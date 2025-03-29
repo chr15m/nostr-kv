@@ -1,0 +1,24 @@
+{
+  "name": "nostr-kv",
+  "version": "0.1.0",
+  "description": "A synchronized key-value store for browser applications that persists data to Nostr",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "test": "node nostr-kv-sync-test.mjs"
+  },
+  "dependencies": {
+    "fake-indexeddb": "^6.0.0",
+    "idb-keyval": "^6.2.1",
+    "nostr-tools": "^2.11.0",
+    "ws": "^8.18.1"
+  },
+  "keywords": [
+    "nostr",
+    "key-value",
+    "storage",
+    "sync",
+    "indexeddb"
+  ],
+  "license": "MIT"
+}
