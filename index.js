@@ -120,11 +120,25 @@ function createStore({
     
     if (Object.keys(updates).length === 0) return;
 
-    const timestamp = Date.now();
+    // Get the keys and values to publish
+    const keys = [];
+    const values = [];
+    const timestamps = [];
+    
+    // For each key in the updates, get its current stored value with metadata
+    for (const key of Object.keys(updates)) {
+      const storedEntry = await localGet(key);
+      if (storedEntry && storedEntry.meta) {
+        keys.push(key);
+        values.push(updates[key]);
+        timestamps.push(storedEntry.meta.lastModified);
+      }
+    }
+
     const data = {
-      keys: Object.keys(updates),
-      values: Object.values(updates),
-      timestamp: timestamp
+      keys: keys,
+      values: values,
+      timestamps: timestamps
     };
 
     const encryptedContent = await encryptData(data);
@@ -199,19 +213,20 @@ function createStore({
             if (!dTag || dTag[1] !== namespace) return;
 
             const decrypted = await decryptData(event.content);
-            if (!decrypted || !decrypted.keys || !decrypted.values) return;
+            if (!decrypted || !decrypted.keys || !decrypted.values || !decrypted.timestamps) return;
 
             // Update local storage with remote changes
             for (let i = 0; i < decrypted.keys.length; i++) {
               const key = decrypted.keys[i];
               const value = decrypted.values[i];
+              const timestamp = decrypted.timestamps[i];
               
               // Get current value to check timestamp
               const current = await localGet(key);
               
               // If we have no local value or remote is newer, update
               if (!current || !current.meta || 
-                  current.meta.lastModified < decrypted.timestamp) {
+                  current.meta.lastModified < timestamp) {
                 
                 if (value === null) {
                   // Handle deletion
@@ -221,7 +236,7 @@ function createStore({
                   await localSet(key, {
                     value,
                     meta: {
-                      lastModified: decrypted.timestamp
+                      lastModified: timestamp
                     }
                   });
                 }
