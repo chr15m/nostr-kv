@@ -69,6 +69,10 @@ function createStore({
 
   // Change listeners
   const changeListeners = [];
+  
+  // Last sync timestamp (stored in a special meta key that won't be synced)
+  const LAST_SYNC_KEY = '_nkvmeta_lastSync';
+  let lastSyncTime = 0;
 
   /**
    * Connect to relays if not already connected
@@ -196,13 +200,19 @@ function createStore({
     await ensureRelayConnections();
 
     connectedRelays.forEach(relay => {
-      const sub = relay.subscribe([
-        {
-          kinds: [30078],
-          "#p": [kvPubkey],
-          "#d": [namespace]
-        }
-      ], {
+      // Create filter with 'since' parameter if we have a last sync time
+      const filter = {
+        kinds: [30078],
+        "#p": [kvPubkey],
+        "#d": [namespace]
+      };
+      
+      // Only add 'since' if we have a valid last sync time
+      if (lastSyncTime > 0) {
+        filter.since = lastSyncTime;
+      }
+      
+      const sub = relay.subscribe([filter], {
         onevent: async (event) => {
           // Skip our own events
           if (event.pubkey === authPubkey) return;
@@ -211,6 +221,18 @@ function createStore({
             // Double-check the namespace (for extra safety)
             const dTag = event.tags.find(tag => tag[0] === 'd');
             if (!dTag || dTag[1] !== namespace) return;
+            
+            // Update last sync time to this event's created_at
+            if (event.created_at > lastSyncTime) {
+              lastSyncTime = event.created_at;
+              // Store the last sync time in IndexedDB but don't sync it
+              await localSet(LAST_SYNC_KEY, {
+                value: lastSyncTime,
+                meta: {
+                  lastModified: Date.now()
+                }
+              });
+            }
 
             const decrypted = await decryptData(event.content);
             if (!decrypted || !decrypted.keys || !decrypted.values || !decrypted.timestamps) return;
@@ -259,8 +281,21 @@ function createStore({
     });
   }
 
-  // Start subscription
-  subscribeToUpdates();
+  // Initialize by loading the last sync time, then start subscription
+  (async function initialize() {
+    try {
+      const syncData = await localGet(LAST_SYNC_KEY);
+      if (syncData && syncData.value) {
+        lastSyncTime = syncData.value;
+        console.log(`Loaded last sync time: ${new Date(lastSyncTime * 1000).toISOString()}`);
+      }
+    } catch (error) {
+      console.error('Error loading last sync time:', error);
+    }
+    
+    // Start subscription
+    subscribeToUpdates();
+  })();
 
   return {
     /**
