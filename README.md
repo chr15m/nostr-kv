@@ -15,6 +15,12 @@ nostr-kv is a browser library that provides a key-value storage system with seam
 - **Namespaced Storage**: Organize data with namespaces to avoid collisions
 - **Built on Proven Libraries**: Uses `idb-keyval` for local storage and `nostr-tools` for Nostr integration
 
+## Limitations
+
+- The fastest you can do sync'ed updates is 1 every second because event time is a unix timestamp (debounce handles this automatically).
+- Total data size in the kv should be smaller than 100kb or relays will time-out when you try to write.
+- Relays will rate-limit updates that happen too frequently, independently of the 1 second limit above.
+
 ## How It Works
 
 1. When you save data, it's stored locally in IndexedDB
