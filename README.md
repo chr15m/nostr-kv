@@ -46,7 +46,8 @@ const store = createStore({
   authNsec: 'your-auth-nsec', // Optional: will be generated if not provided
   kvNsec: 'your-kv-nsec',     // Optional: will be generated if not provided
   relays: ['wss://relay.example.com'], // Optional: will use default relays if not provided
-  debounce: 1000 // Optional: milliseconds to wait before syncing rapid changes (default: 500)
+  debounce: 1000, // Optional: milliseconds to wait before syncing rapid changes (default: 500)
+  dbName: 'custom-db-name' // Optional: custom IndexedDB database name
 });
 
 // Set a value

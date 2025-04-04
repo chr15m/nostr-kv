@@ -24,6 +24,7 @@ const DEFAULT_DEBOUNCE = 500;
  * @param {string} [options.kvNsec] Secret key for encryption (will be generated if not provided)
  * @param {string[]} [options.relays] Array of relay URLs (defaults to predefined list)
  * @param {number} [options.debounce] Debounce time in ms for rapid updates (default: 500)
+ * @param {string} [options.dbName] Custom IndexedDB database name (useful for testing)
  * @returns {Object} Store interface with get, set, del methods
  */
 function createStore({
@@ -31,7 +32,8 @@ function createStore({
   authNsec,
   kvNsec,
   relays = DEFAULT_RELAYS,
-  debounce = DEFAULT_DEBOUNCE
+  debounce = DEFAULT_DEBOUNCE,
+  dbName = null
 }) {
   if (!namespace) {
     throw new Error('Namespace is required');
@@ -54,7 +56,8 @@ function createStore({
   const kvPubkey = getPublicKey(kvSecretKey);
 
   // Create a custom store for this namespace
-  const customStore = createIdbStore(`nostr-kv-${namespace}`, 'keyval');
+  const dbNameToUse = dbName || `nostr-kv-${namespace}`;
+  const customStore = createIdbStore(dbNameToUse, 'keyval');
   const localGet = (key) => idbGet(key, customStore);
   const localSet = (key, value) => idbSet(key, value, customStore);
   const localDel = (key) => idbDel(key, customStore);
@@ -145,6 +148,11 @@ function createStore({
       timestamps: timestamps
     };
 
+    console.log(`[DEBUG] Publishing to Nostr - Namespace: ${namespace}, AuthPubkey: ${authPubkey}`);
+    console.log(`[DEBUG] Keys being published:`, keys);
+    console.log(`[DEBUG] Values being published:`, values);
+    console.log(`[DEBUG] Timestamps being published:`, timestamps);
+
     const encryptedContent = await encryptData(data);
 
     const eventTemplate = {
@@ -222,6 +230,10 @@ function createStore({
             const dTag = event.tags.find(tag => tag[0] === 'd');
             if (!dTag || dTag[1] !== namespace) return;
             
+            console.log(`[DEBUG] Received event from pubkey: ${event.pubkey}`);
+            console.log(`[DEBUG] Event created_at: ${new Date(event.created_at * 1000).toISOString()}`);
+            console.log(`[DEBUG] Event tags:`, event.tags);
+            
             // Update last sync time to this event's created_at
             if (event.created_at > lastSyncTime) {
               lastSyncTime = event.created_at;
@@ -235,7 +247,14 @@ function createStore({
             }
 
             const decrypted = await decryptData(event.content);
-            if (!decrypted || !decrypted.keys || !decrypted.values || !decrypted.timestamps) return;
+            if (!decrypted || !decrypted.keys || !decrypted.values || !decrypted.timestamps) {
+              console.error(`[DEBUG] Failed to decrypt event or invalid format:`, decrypted);
+              return;
+            }
+            
+            console.log(`[DEBUG] Decrypted keys:`, decrypted.keys);
+            console.log(`[DEBUG] Decrypted values:`, decrypted.values);
+            console.log(`[DEBUG] Decrypted timestamps:`, decrypted.timestamps);
 
             // Update local storage with remote changes
             for (let i = 0; i < decrypted.keys.length; i++) {
