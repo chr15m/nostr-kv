@@ -39,6 +39,9 @@ async function runTest() {
   console.log(`Client 2 authPubkey: ${authPubkey2}`);
   console.log(`Client 3 authPubkey: ${authPubkey3} (will be offline)`);
   
+  // Check if DEBUG environment variable is set
+  const debugEnabled = process.env.DEBUG !== undefined;
+  
   // Create three stores with the same kvNsec but different authNsec and isolated databases
   const store1 = createStore({
     namespace: TEST_NAMESPACE,
@@ -46,7 +49,8 @@ async function runTest() {
     kvNsec: kvNsec,
     relays: [TEST_RELAY],
     debounce: 100, // Use a small debounce for testing
-    dbName: `client1-${TEST_NAMESPACE}` // Unique database name for client 1
+    dbName: `client1-${TEST_NAMESPACE}`, // Unique database name for client 1
+    debug: debugEnabled // Enable debug logging based on environment variable
   });
   
   const store2 = createStore({
@@ -55,7 +59,8 @@ async function runTest() {
     kvNsec: kvNsec,
     relays: [TEST_RELAY],
     debounce: 100, // Use a small debounce for testing
-    dbName: `client2-${TEST_NAMESPACE}` // Unique database name for client 2
+    dbName: `client2-${TEST_NAMESPACE}`, // Unique database name for client 2
+    debug: debugEnabled // Enable debug logging based on environment variable
   });
   
   // We'll create store3 later to simulate it being offline initially
@@ -70,7 +75,6 @@ async function runTest() {
     
     console.log(`Client 1 setting "${key1}" to:`, value1);
     await store1.set(key1, value1);
-    await store1.flush();
     
     // Wait a moment
     await new Promise(resolve => setTimeout(resolve, 500));
@@ -81,7 +85,6 @@ async function runTest() {
     
     console.log(`Client 2 setting "${key2}" to:`, value2);
     await store2.set(key2, value2);
-    await store2.flush();
     
     // Wait a moment
     await new Promise(resolve => setTimeout(resolve, 500));
@@ -92,7 +95,6 @@ async function runTest() {
     
     console.log(`Client 1 setting "${key3}" to:`, value3);
     await store1.set(key3, value3);
-    await store1.flush();
     
     // Wait for sync between Client 1 and Client 2
     console.log(`Waiting ${SYNC_DELAY}ms for sync between online clients...`);
@@ -127,7 +129,8 @@ async function runTest() {
       kvNsec: kvNsec,
       relays: [TEST_RELAY],
       debounce: 100,
-      dbName: `client3-${TEST_NAMESPACE}` // Unique database name for client 3
+      dbName: `client3-${TEST_NAMESPACE}`, // Unique database name for client 3
+      debug: debugEnabled // Enable debug logging based on environment variable
     });
     
     // Set up change listener for store3

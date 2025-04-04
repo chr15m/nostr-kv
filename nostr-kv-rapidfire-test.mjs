@@ -36,6 +36,9 @@ async function runTest() {
   console.log(`Client 1 authPubkey: ${authPubkey1} (will make rapid changes)`);
   console.log(`Client 2 authPubkey: ${authPubkey2} (will receive changes)`);
   
+  // Check if DEBUG environment variable is set
+  const debugEnabled = process.env.DEBUG !== undefined;
+  
   // Create two stores with different debounce settings and isolated databases
   const store1 = createStore({
     namespace: TEST_NAMESPACE,
@@ -43,7 +46,8 @@ async function runTest() {
     kvNsec: kvNsec,
     relays: [TEST_RELAY],
     debounce: 500, // Use a longer debounce for testing
-    dbName: `client1-${TEST_NAMESPACE}` // Unique database name for client 1
+    dbName: `client1-${TEST_NAMESPACE}`, // Unique database name for client 1
+    debug: debugEnabled // Enable debug logging based on environment variable
   });
   
   const store2 = createStore({
@@ -52,7 +56,8 @@ async function runTest() {
     kvNsec: kvNsec,
     relays: [TEST_RELAY],
     debounce: 100, // Use a small debounce for testing
-    dbName: `client2-${TEST_NAMESPACE}` // Unique database name for client 2
+    dbName: `client2-${TEST_NAMESPACE}`, // Unique database name for client 2
+    debug: debugEnabled // Enable debug logging based on environment variable
   });
   
   // Set up change listener for store2
@@ -85,7 +90,7 @@ async function runTest() {
       await new Promise(resolve => setTimeout(resolve, 20));
     }
     
-    // Wait a moment but don't flush - let the debounce handle it
+    // Wait for debounce to trigger
     console.log("Waiting for debounce to trigger...");
     await new Promise(resolve => setTimeout(resolve, 1000));
     

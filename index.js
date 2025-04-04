@@ -14,7 +14,8 @@ const DEFAULT_RELAYS = [
 ];
 
 // Default debounce time in milliseconds
-const DEFAULT_DEBOUNCE = 500;
+// Ensures created_at timestamp is never duplicated
+const DEFAULT_DEBOUNCE = 1010;
 
 /**
  * Creates a key-value store that syncs with Nostr
@@ -25,6 +26,7 @@ const DEFAULT_DEBOUNCE = 500;
  * @param {string[]} [options.relays] Array of relay URLs (defaults to predefined list)
  * @param {number} [options.debounce] Debounce time in ms for rapid updates (default: 500)
  * @param {string} [options.dbName] Custom IndexedDB database name (useful for testing)
+ * @param {boolean} [options.debug] Enable debug logging (default: false)
  * @returns {Object} Store interface with get, set, del methods
  */
 function createStore({
@@ -33,7 +35,8 @@ function createStore({
   kvNsec,
   relays = DEFAULT_RELAYS,
   debounce = DEFAULT_DEBOUNCE,
-  dbName = null
+  dbName = null,
+  debug = false
 }) {
   if (!namespace) {
     throw new Error('Namespace is required');
@@ -54,6 +57,28 @@ function createStore({
 
   const authPubkey = getPublicKey(authSecretKey);
   const kvPubkey = getPublicKey(kvSecretKey);
+  
+  /**
+   * Debug logging function that only logs when debug is enabled
+   * @param {...any} args Arguments to log
+   */
+  function log(...args) {
+    if (debug) {
+      const shortAuthKey = authPubkey.substring(0, 8);
+      console.log(`[DEBUG ${shortAuthKey}]`, ...args);
+    }
+  }
+  
+  /**
+   * Debug error logging function that only logs when debug is enabled
+   * @param {...any} args Arguments to log
+   */
+  function logError(...args) {
+    if (debug) {
+      const shortAuthKey = authPubkey.substring(0, 8);
+      console.error(`[DEBUG ${shortAuthKey}]`, ...args);
+    }
+  }
 
   // Create a custom store for this namespace
   const dbNameToUse = dbName || `nostr-kv-${namespace}`;
@@ -75,9 +100,7 @@ function createStore({
   
   // Special meta keys (stored in a special meta key that won't be synced)
   const LAST_SYNC_KEY = '_nkvmeta_lastSync';
-  const LAST_PUBLISH_KEY = '_nkvmeta_lastPublish';
   let lastSyncTime = 0;
-  let lastPublishTime = 0;
 
   /**
    * Connect to relays if not already connected
@@ -145,28 +168,26 @@ function createStore({
       }
     }
 
-    console.log(`[DEBUG] Publishing to Nostr - Namespace: ${namespace}, AuthPubkey: ${authPubkey}`);
-    console.log(`[DEBUG] Publishing ${Object.keys(data).length} entries`);
-    console.log(`[DEBUG] Data structure being published:`, JSON.stringify(data, null, 2));
+    log(`Publishing to Nostr - Namespace: ${namespace}, AuthPubkey: ${authPubkey}`);
+    log(`Publishing ${Object.keys(data).length} entries`);
+    log(`Data structure being published:`, JSON.stringify(data, null, 2));
     
     const encryptedContent = await encryptData(data);
 
-    try {
-      const lastPublishData = await localGet(LAST_PUBLISH_KEY);
-      if (lastPublishData && lastPublishData.value) {
-        lastPublishTime = lastPublishData.value;
+    // Find the maximum lastModified timestamp from all entries
+    let maxLastModified = 0;
+    for (const [key, entry] of Object.entries(data)) {
+      if (entry.lastModified > maxLastModified) {
+        maxLastModified = entry.lastModified;
       }
-    } catch (error) {
-      console.error('Error loading last publish time:', error);
     }
     
-    // Ensure our timestamp is newer than our last publish
+    // Convert to seconds and ensure it's newer than current time
     const currentTime = Math.floor(Date.now() / 1000);
-    const eventTime = Math.max(currentTime, lastPublishTime + 1);
     
     const eventTemplate = {
       kind: 30078,
-      created_at: eventTime,
+      created_at: currentTime,
       tags: [
         ["d", namespace], 
         ["a", `30078:${authPubkey}:${namespace}`], 
@@ -175,13 +196,6 @@ function createStore({
       content: encryptedContent
     };
     
-    // Update our last publish time
-    await localSet(LAST_PUBLISH_KEY, {
-      value: eventTime,
-      meta: {
-        lastModified: Date.now()
-      }
-    });
 
     const signedEvent = finalizeEvent(eventTemplate, authSecretKey);
 
@@ -297,9 +311,9 @@ function createStore({
             const dTag = event.tags.find(tag => tag[0] === 'd');
             if (!dTag || dTag[1] !== namespace) return;
             
-            console.log(`[DEBUG] Received event from pubkey: ${event.pubkey}`);
-            console.log(`[DEBUG] Event created_at: ${new Date(event.created_at * 1000).toISOString()}`);
-            console.log(`[DEBUG] Event tags:`, event.tags);
+            log(`Received event from pubkey: ${event.pubkey}`);
+            log(`Event created_at: ${new Date(event.created_at * 1000).toISOString()}`);
+            log(`Event tags:`, event.tags);
             
             // Update last sync time to this event's created_at
             if (event.created_at > lastSyncTime) {
@@ -315,12 +329,12 @@ function createStore({
 
             const decrypted = await decryptData(event.content);
             if (!decrypted) {
-              console.error(`[DEBUG] Failed to decrypt event or invalid format:`, decrypted);
+              logError(`Failed to decrypt event or invalid format:`, decrypted);
               return;
             }
             
-            console.log(`[DEBUG] Received ${Object.keys(decrypted).length} entries`);
-            console.log(`[DEBUG] Decrypted data structure:`, JSON.stringify(decrypted, null, 2));
+            log(`Received ${Object.keys(decrypted).length} entries`);
+            log(`Decrypted data structure:`, JSON.stringify(decrypted, null, 2));
             
             // Track which keys have changed for notifications
             const changedKeys = [];
@@ -374,18 +388,8 @@ function createStore({
                 });
               }
               
-              // Notify sync event listeners
-              syncEventListeners.forEach(listener => {
-                try {
-                  listener({
-                    source: 'remote',
-                    pubkey: event.pubkey,
-                    changedKeys
-                  });
-                } catch (error) {
-                  console.error('Error in sync event listener:', error);
-                }
-              });
+              // We don't trigger sync events for remote changes anymore
+              // This makes onSync only fire for outgoing publishes
             }
           } catch (error) {
             console.error('Error processing remote event:', error);
@@ -401,14 +405,9 @@ function createStore({
       const syncData = await localGet(LAST_SYNC_KEY);
       if (syncData && syncData.value) {
         lastSyncTime = syncData.value;
-        console.log(`Loaded last sync time: ${new Date(lastSyncTime * 1000).toISOString()}`);
+        log(`Loaded last sync time: ${new Date(lastSyncTime * 1000).toISOString()}`);
       }
       
-      const publishData = await localGet(LAST_PUBLISH_KEY);
-      if (publishData && publishData.value) {
-        lastPublishTime = publishData.value;
-        console.log(`Loaded last publish time: ${new Date(lastPublishTime * 1000).toISOString()}`);
-      }
     } catch (error) {
       console.error('Error loading meta', error);
     }

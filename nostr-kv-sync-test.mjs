@@ -36,6 +36,9 @@ async function runTest() {
   console.log(`Client 1 authPubkey: ${authPubkey1}`);
   console.log(`Client 2 authPubkey: ${authPubkey2}`);
   
+  // Check if DEBUG environment variable is set
+  const debugEnabled = process.env.DEBUG !== undefined;
+  
   // Create two stores with the same kvNsec but different authNsec and isolated databases
   const store1 = createStore({
     namespace: TEST_NAMESPACE,
@@ -43,7 +46,8 @@ async function runTest() {
     kvNsec: kvNsec,
     relays: [TEST_RELAY],
     debounce: 100, // Use a small debounce for testing
-    dbName: `client1-${TEST_NAMESPACE}` // Unique database name for client 1
+    dbName: `client1-${TEST_NAMESPACE}`, // Unique database name for client 1
+    debug: debugEnabled // Enable debug logging based on environment variable
   });
   
   const store2 = createStore({
@@ -52,7 +56,8 @@ async function runTest() {
     kvNsec: kvNsec,
     relays: [TEST_RELAY],
     debounce: 100, // Use a small debounce for testing
-    dbName: `client2-${TEST_NAMESPACE}` // Unique database name for client 2
+    dbName: `client2-${TEST_NAMESPACE}`, // Unique database name for client 2
+    debug: debugEnabled // Enable debug logging based on environment variable
   });
   
   // Set up change listener for store2
@@ -72,14 +77,6 @@ async function runTest() {
     
     console.log(`Client 1 setting "${testKey}" to:`, testValue);
     await store1.set(testKey, testValue);
-    
-    // Force immediate sync
-    try {
-      await store1.flush();
-    } catch (error) {
-      console.log(`Sync error (expected during tests): ${error.message}`);
-      // Continue with the test - the error is expected and handled
-    }
     
     // Wait for sync to happen
     console.log(`Waiting for sync (max ${SYNC_DELAY}ms)...`);
@@ -123,14 +120,6 @@ async function runTest() {
     console.log(`Client 2 setting "${testKey2}" to:`, testValue2);
     await store2.set(testKey2, testValue2);
     
-    // Force immediate sync
-    try {
-      await store2.flush();
-    } catch (error) {
-      console.log(`Sync error (expected during tests): ${error.message}`);
-      // Continue with the test - the error is expected and handled
-    }
-    
     // Wait for sync to happen
     console.log(`Waiting for sync (max ${SYNC_DELAY}ms)...`);
     await new Promise((resolve) => {
@@ -162,12 +151,6 @@ async function runTest() {
     // Client 1 sets the value first
     console.log(`Client 1 setting "${conflictKey}" to:`, value1);
     await store1.set(conflictKey, value1);
-    try {
-      await store1.flush();
-    } catch (error) {
-      console.log(`Sync error (expected during tests): ${error.message}`);
-      // Continue with the test - the error is expected and handled
-    }
     
     // Wait a moment to ensure timestamps are different
     await new Promise(resolve => setTimeout(resolve, 100));
@@ -175,21 +158,68 @@ async function runTest() {
     // Client 2 sets a different value (later timestamp is handled internally)
     console.log(`Client 2 setting "${conflictKey}" to:`, value2);
     await store2.set(conflictKey, value2);
-    try {
-      await store2.flush();
-    } catch (error) {
-      console.log(`Sync error (expected during tests): ${error.message}`);
-      // Continue with the test - the error is expected and handled
-    }
     
-    // Wait for sync
-    console.log(`Waiting for sync (max ${SYNC_DELAY}ms)...`);
+    // Wait for client1 to publish its changes
+    console.log(`Waiting for client1 to publish (max ${SYNC_DELAY}ms)...`);
     await new Promise((resolve) => {
       const timeout = setTimeout(resolve, SYNC_DELAY);
       const unsubscribe = store1.onSync(() => {
         clearTimeout(timeout);
         unsubscribe();
         resolve();
+      });
+    });
+    
+    // Wait for client2 to publish its changes
+    console.log(`Waiting for client2 to publish (max ${SYNC_DELAY}ms)...`);
+    await new Promise((resolve) => {
+      const timeout = setTimeout(resolve, SYNC_DELAY);
+      const unsubscribe = store2.onSync(() => {
+        clearTimeout(timeout);
+        unsubscribe();
+        resolve();
+      });
+    });
+    
+    // Wait for client1 to receive client2's changes
+    console.log(`Waiting for client1 to receive client2's changes (max ${SYNC_DELAY}ms)...`);
+    await new Promise((resolve) => {
+      // If we already received the change, resolve immediately
+      store1.get(conflictKey).then(value => {
+        if (value && value.message === value2.message) {
+          resolve();
+          return;
+        }
+        
+        const timeout = setTimeout(resolve, SYNC_DELAY);
+        const unsubscribe = store1.onChange((key, value) => {
+          if (key === conflictKey && value && value.message === value2.message) {
+            clearTimeout(timeout);
+            unsubscribe();
+            resolve();
+          }
+        });
+      });
+    });
+    
+    // Wait for client2 to receive client1's changes (though client2's should win)
+    console.log(`Waiting for client2 to receive client1's changes (max ${SYNC_DELAY}ms)...`);
+    await new Promise((resolve) => {
+      // If we already have the right value, resolve immediately
+      store2.get(conflictKey).then(value => {
+        if (value && value.message === value2.message) {
+          resolve();
+          return;
+        }
+        
+        const timeout = setTimeout(resolve, SYNC_DELAY);
+        const unsubscribe = store2.onChange((key) => {
+          if (key === conflictKey) {
+            clearTimeout(timeout);
+            unsubscribe();
+            resolve();
+          }
+        });
       });
     });
     

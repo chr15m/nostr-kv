@@ -40,6 +40,9 @@ async function runTest() {
   console.log(`Client 1 authPubkey: ${authPubkey1} (will be offline)`);
   console.log(`Client 2 authPubkey: ${authPubkey2} (will be online)`);
   
+  // Check if DEBUG environment variable is set
+  const debugEnabled = process.env.DEBUG !== undefined;
+  
   // Create a store with a real relay connection and isolated database
   const store2 = createStore({
     namespace: TEST_NAMESPACE,
@@ -47,7 +50,8 @@ async function runTest() {
     kvNsec: kvNsec,
     relays: [ONLINE_RELAY],
     debounce: 100,
-    dbName: `client2-${TEST_NAMESPACE}` // Unique database name for client 2
+    dbName: `client2-${TEST_NAMESPACE}`, // Unique database name for client 2
+    debug: debugEnabled // Enable debug logging based on environment variable
   });
   
   try {
@@ -59,7 +63,8 @@ async function runTest() {
       kvNsec: kvNsec,
       relays: [OFFLINE_RELAY],
       debounce: 100,
-      dbName: `client1-${TEST_NAMESPACE}` // Unique database name for client 1
+      dbName: `client1-${TEST_NAMESPACE}`, // Unique database name for client 1
+      debug: debugEnabled // Enable debug logging based on environment variable
     });
     
     // Test: Make changes while offline
@@ -77,13 +82,15 @@ async function runTest() {
     console.log(`Client 1 setting "${offlineKey2}" while offline`);
     await store1.set(offlineKey2, offlineValue2);
     
-    // Try to flush changes (should fail because we're offline)
-    console.log("Attempting to flush changes while offline...");
+    // We don't need to explicitly flush - the library will try to sync automatically
+    // and fail because we're offline, but we'll catch the error
+    console.log("Changes made while offline, waiting a moment...");
     try {
+      // Force a flush to trigger the error
       await store1.flush();
-      console.log("❌ Unexpected: Flush succeeded while offline");
+      console.log("❌ Expected an error when trying to publish while offline");
     } catch (error) {
-      console.log("✅ Expected: Flush failed while offline:", error.message);
+      console.log("✅ Successfully caught expected error when offline:", error.message);
     }
     
     // Verify the changes are stored locally
@@ -113,7 +120,8 @@ async function runTest() {
       kvNsec: kvNsec,
       relays: [ONLINE_RELAY],
       debounce: 100,
-      dbName: `client1-${TEST_NAMESPACE}` // Same database name as the offline client
+      dbName: `client1-${TEST_NAMESPACE}`, // Same database name as the offline client
+      debug: debugEnabled // Enable debug logging based on environment variable
     });
     
     // Set up change listener for store2
@@ -139,9 +147,9 @@ async function runTest() {
     console.log(`Client 1 setting "${onlineKey}" while online`);
     await store1Online.set(onlineKey, onlineValue);
     
-    // Flush changes (should succeed now that we're online)
-    console.log("Flushing changes while online...");
-    await store1Online.flush();
+    // The library will automatically try to sync after the debounce period
+    console.log("Changes made while online, waiting for debounce...");
+    await new Promise(resolve => setTimeout(resolve, 500));
     
     // Wait for sync to happen
     console.log(`Waiting ${SYNC_DELAY}ms for sync...`);

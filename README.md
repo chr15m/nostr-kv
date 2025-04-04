@@ -53,7 +53,8 @@ const store = createStore({
   kvNsec: 'your-kv-nsec',     // Optional: will be generated if not provided
   relays: ['wss://relay.example.com'], // Optional: will use default relays if not provided
   debounce: 1000, // Optional: milliseconds to wait before syncing rapid changes (default: 500)
-  dbName: 'custom-db-name' // Optional: custom IndexedDB database name
+  dbName: 'custom-db-name', // Optional: custom IndexedDB database name
+  debug: false // Optional: enable debug logging (default: false)
 });
 
 // Set a value
