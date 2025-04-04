@@ -43,21 +43,21 @@ function createStore({
   }
 
   // Generate keys if not provided
-  const authSecretKey = authNsec 
-    ? (typeof authNsec === 'string' && authNsec.startsWith('nsec') 
-        ? nip19.decode(authNsec).data 
+  const authSecretKey = authNsec
+    ? (typeof authNsec === 'string' && authNsec.startsWith('nsec')
+        ? nip19.decode(authNsec).data
         : authNsec)
     : generateSecretKey();
-  
+
   const kvSecretKey = kvNsec
-    ? (typeof kvNsec === 'string' && kvNsec.startsWith('nsec') 
-        ? nip19.decode(kvNsec).data 
+    ? (typeof kvNsec === 'string' && kvNsec.startsWith('nsec')
+        ? nip19.decode(kvNsec).data
         : kvNsec)
     : generateSecretKey();
 
   const authPubkey = getPublicKey(authSecretKey);
   const kvPubkey = getPublicKey(kvSecretKey);
-  
+
   /**
    * Debug logging function that only logs when debug is enabled
    * @param {...any} args Arguments to log
@@ -68,7 +68,7 @@ function createStore({
       console.log(`[DEBUG ${shortAuthKey}]`, ...args);
     }
   }
-  
+
   /**
    * Debug error logging function that only logs when debug is enabled
    * @param {...any} args Arguments to log
@@ -97,7 +97,7 @@ function createStore({
   // Change listeners and sync event listeners
   const changeListeners = [];
   const syncEventListeners = [];
-  
+
   // Special meta keys (stored in a special meta key that won't be synced)
   const LAST_SYNC_KEY = '_nkvmeta_lastSync';
   let lastSyncTime = 0;
@@ -149,17 +149,17 @@ function createStore({
    */
   async function publishToNostr() {
     await ensureRelayConnections();
-    
+
     // Get all entries from the store (except meta entries)
     const allEntries = await idbEntries(customStore);
-    
+
     // Filter out meta entries and build our data structure
     const data = {};
-    
+
     for (const [key, entry] of allEntries) {
       // Skip internal meta keys
       if (key.startsWith('_nkvmeta')) continue;
-      
+
       if (entry && entry.meta) {
         data[key] = {
           value: entry.value,
@@ -171,7 +171,7 @@ function createStore({
     log(`Publishing to Nostr - Namespace: ${namespace}, AuthPubkey: ${authPubkey}`);
     log(`Publishing ${Object.keys(data).length} entries`);
     log(`Data structure being published:`, JSON.stringify(data, null, 2));
-    
+
     const encryptedContent = await encryptData(data);
 
     // Find the maximum lastModified timestamp from all entries
@@ -181,26 +181,26 @@ function createStore({
         maxLastModified = entry.lastModified;
       }
     }
-    
+
     // Convert to seconds and ensure it's newer than current time
     const currentTime = Math.floor(Date.now() / 1000);
-    
+
     const eventTemplate = {
       kind: 30078,
       created_at: currentTime,
       tags: [
-        ["d", namespace], 
-        ["a", `30078:${authPubkey}:${namespace}`], 
+        ["d", namespace],
+        ["a", `30078:${authPubkey}:${namespace}`],
         ["p", kvPubkey]
       ],
       content: encryptedContent
     };
-    
+
 
     const signedEvent = finalizeEvent(eventTemplate, authSecretKey);
 
     // Publish to all connected relays
-    const publishPromises = connectedRelays.map(relay => 
+    const publishPromises = connectedRelays.map(relay =>
       relay.publish(signedEvent).catch(err => {
         if (err.message) {
           if (err.message.includes("replaced: have newer event")) {
@@ -221,14 +221,14 @@ function createStore({
     try {
       // Track results for better error handling
       const results = await Promise.allSettled(publishPromises);
-      
+
       // Check if we had at least one success
       const anySuccess = results.some(r => r.status === 'fulfilled');
-      
+
       if (anySuccess) {
         // If we had at least one success, consider it a success
         console.log(`Published successfully to at least one relay`);
-        
+
         // Notify sync event listeners of success
         syncEventListeners.forEach(listener => {
           try {
@@ -244,7 +244,7 @@ function createStore({
       } else {
         // Real failure - all relays rejected for reasons other than "replaced"
         console.error('All publish attempts failed:', results);
-        
+
         // Notify sync event listeners of failure
         syncEventListeners.forEach(listener => {
           try {
@@ -258,7 +258,7 @@ function createStore({
             console.error('Error in sync event listener:', listenerError);
           }
         });
-        
+
         // Throw a consolidated error
         throw new Error('Failed to publish to any relay');
       }
@@ -275,7 +275,7 @@ function createStore({
     if (debounceTimer) {
       clearTimeout(debounceTimer);
     }
-    
+
     debounceTimer = setTimeout(async () => {
       debounceTimer = null;
       await publishToNostr();
@@ -295,12 +295,12 @@ function createStore({
         "#p": [kvPubkey],
         "#d": [namespace]
       };
-      
+
       // Only add 'since' if we have a valid last sync time
       if (lastSyncTime > 0) {
         filter.since = lastSyncTime;
       }
-      
+
       const sub = relay.subscribe([filter], {
         onevent: async (event) => {
           // Skip our own events
@@ -310,11 +310,11 @@ function createStore({
             // Double-check the namespace (for extra safety)
             const dTag = event.tags.find(tag => tag[0] === 'd');
             if (!dTag || dTag[1] !== namespace) return;
-            
+
             log(`Received event from pubkey: ${event.pubkey}`);
             log(`Event created_at: ${new Date(event.created_at * 1000).toISOString()}`);
             log(`Event tags:`, event.tags);
-            
+
             // Update last sync time to this event's created_at
             if (event.created_at > lastSyncTime) {
               lastSyncTime = event.created_at;
@@ -332,10 +332,10 @@ function createStore({
               logError(`Failed to decrypt event or invalid format:`, decrypted);
               return;
             }
-            
+
             log(`Received ${Object.keys(decrypted).length} entries`);
             log(`Decrypted data structure:`, JSON.stringify(decrypted, null, 2));
-            
+
             // Track which keys have changed for notifications
             const changedKeys = [];
 
@@ -343,17 +343,17 @@ function createStore({
             for (const [key, entry] of Object.entries(decrypted)) {
               // Skip internal meta keys
               if (key.startsWith('_nkvmeta')) continue;
-              
+
               const value = entry.value;
               const timestamp = entry.lastModified;
-              
+
               // Get current value to check timestamp
               const current = await localGet(key);
-              
+
               // If we have no local value or remote is newer, update
-              if (!current || !current.meta || 
+              if (!current || !current.meta ||
                   current.meta.lastModified < timestamp) {
-                
+
                 if (value === null) {
                   // Handle deletion
                   await localDel(key);
@@ -366,18 +366,18 @@ function createStore({
                     }
                   });
                 }
-                
+
                 // Add to changed keys list
                 changedKeys.push(key);
               }
             }
-            
+
             // Notify listeners of all changes at once
             if (changedKeys.length > 0) {
               for (const key of changedKeys) {
                 const entry = await localGet(key);
                 const value = entry ? entry.value : null;
-                
+
                 // Notify listeners
                 changeListeners.forEach(listener => {
                   try {
@@ -387,7 +387,7 @@ function createStore({
                   }
                 });
               }
-              
+
               // We don't trigger sync events for remote changes anymore
               // This makes onSync only fire for outgoing publishes
             }
@@ -407,11 +407,11 @@ function createStore({
         lastSyncTime = syncData.value;
         log(`Loaded last sync time: ${new Date(lastSyncTime * 1000).toISOString()}`);
       }
-      
+
     } catch (error) {
       console.error('Error loading meta', error);
     }
-    
+
     // Start subscription
     subscribeToUpdates();
   })();
@@ -437,7 +437,7 @@ function createStore({
      */
     async set(key, value) {
       const timestamp = Date.now();
-      
+
       // Store the value with metadata (timestamp is an implementation detail)
       await localSet(key, {
         value,
@@ -474,7 +474,7 @@ function createStore({
         }
       };
     },
-    
+
     /**
      * Register a callback for sync events (both local and remote)
      * @param {Function} callback Function called with sync event details
@@ -521,7 +521,7 @@ function createStore({
         clearTimeout(debounceTimer);
         debounceTimer = null;
       }
-      
+
       await publishToNostr();
     },
 
@@ -531,7 +531,7 @@ function createStore({
     async close() {
       // Flush any pending updates
       await this.flush();
-      
+
       // Close all relay connections
       for (const relay of connectedRelays) {
         relay.close();
