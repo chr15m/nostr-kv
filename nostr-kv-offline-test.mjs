@@ -138,8 +138,15 @@ async function runTest() {
     });
     
     // Wait for Client 3 to sync and catch up
-    console.log(`Waiting ${SYNC_DELAY * 2}ms for offline client to catch up...`);
-    await new Promise(resolve => setTimeout(resolve, SYNC_DELAY * 2));
+    console.log(`Waiting for offline client to catch up (max ${SYNC_DELAY * 2}ms)...`);
+    await new Promise((resolve) => {
+      const timeout = setTimeout(resolve, SYNC_DELAY * 2);
+      const unsubscribe = store3.onSync(() => {
+        clearTimeout(timeout);
+        unsubscribe();
+        resolve();
+      });
+    });
     
     // Verify Client 3 caught up with all changes
     const client3Key1 = await store3.get(key1);
@@ -172,6 +179,7 @@ async function runTest() {
     await store2.close();
     
     console.log("Test completed, connections closed.");
+    // Exit immediately to prevent any further traffic
     process.exit(0);
   }
 }

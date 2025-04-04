@@ -90,8 +90,15 @@ async function runTest() {
     await new Promise(resolve => setTimeout(resolve, 1000));
     
     // Wait for sync to happen
-    console.log(`Waiting ${SYNC_DELAY}ms for sync...`);
-    await new Promise(resolve => setTimeout(resolve, SYNC_DELAY));
+    console.log(`Waiting for sync (max ${SYNC_DELAY}ms)...`);
+    await new Promise((resolve) => {
+      const timeout = setTimeout(resolve, SYNC_DELAY);
+      const unsubscribe = store1.onSync(() => {
+        clearTimeout(timeout);
+        unsubscribe();
+        resolve();
+      });
+    });
     
     // Check if all keys were received by Client 2
     console.log(`Client 2 received changes for ${changedKeys.size} keys`);

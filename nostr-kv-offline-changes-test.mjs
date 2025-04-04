@@ -16,32 +16,9 @@ const TEST_NAMESPACE = 'offline-changes-test-' + Math.floor(Math.random() * 1000
 const TEST_RELAY = 'wss://relay.damus.io';
 const SYNC_DELAY = 2000; // Time to wait for sync to happen
 
-// Mock implementation to simulate offline behavior
-class OfflineRelay {
-  constructor(url) {
-    this.url = url;
-    this.isOnline = false;
-  }
-
-  static async connect(url) {
-    return new OfflineRelay(url);
-  }
-
-  subscribe() {
-    return { close: () => {} };
-  }
-
-  async publish() {
-    if (!this.isOnline) {
-      throw new Error('Network error: offline');
-    }
-    return true;
-  }
-
-  // Mock the close method
-
-  close() {}
-}
+// Use a non-existent relay URL to simulate being offline
+const OFFLINE_RELAY = 'wss://non.existent.relay.that.will.fail';
+const ONLINE_RELAY = 'wss://relay.damus.io';
 
 async function runTest() {
   console.log(`Starting offline changes test with namespace: ${TEST_NAMESPACE}`);
@@ -68,22 +45,19 @@ async function runTest() {
     namespace: TEST_NAMESPACE,
     authNsec: nip19.nsecEncode(authSecretKey2),
     kvNsec: kvNsec,
-    relays: [TEST_RELAY],
+    relays: [ONLINE_RELAY],
     debounce: 100,
     dbName: `client2-${TEST_NAMESPACE}` // Unique database name for client 2
   });
   
-  // Override the Relay implementation for the offline test
-  const originalRelay = globalThis.Relay;
-  globalThis.Relay = OfflineRelay;
-  
   try {
     // Create a store that will be "offline" with isolated database
+    // Use the non-existent relay URL to simulate being offline
     const store1 = createStore({
       namespace: TEST_NAMESPACE,
       authNsec: nip19.nsecEncode(authSecretKey1),
       kvNsec: kvNsec,
-      relays: [TEST_RELAY],
+      relays: [OFFLINE_RELAY],
       debounce: 100,
       dbName: `client1-${TEST_NAMESPACE}` // Unique database name for client 1
     });
@@ -130,16 +104,14 @@ async function runTest() {
     // Now go online
     console.log("\n--- Going online and syncing offline changes ---");
     
-    // Restore the original Relay implementation
-    globalThis.Relay = originalRelay;
-    
     // Create a new store with the same keys but online
     // Use the same database name to simulate the same client coming back online
+    // But now use a valid relay URL
     const store1Online = createStore({
       namespace: TEST_NAMESPACE,
       authNsec: nip19.nsecEncode(authSecretKey1),
       kvNsec: kvNsec,
-      relays: [TEST_RELAY],
+      relays: [ONLINE_RELAY],
       debounce: 100,
       dbName: `client1-${TEST_NAMESPACE}` // Same database name as the offline client
     });
@@ -206,11 +178,6 @@ async function runTest() {
   } catch (error) {
     console.error("Test failed with error:", error);
   } finally {
-    // Restore original Relay implementation if needed
-    if (globalThis.Relay !== originalRelay) {
-      globalThis.Relay = originalRelay;
-    }
-    
     // Close connections
     await store2.close();
     

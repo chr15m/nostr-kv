@@ -1,6 +1,6 @@
 // Check if we're in a Node.js environment with fake-indexeddb
 // The polyfill should be imported before this file
-import { get as idbGet, set as idbSet, del as idbDel, createStore as createIdbStore } from 'idb-keyval';
+import { get as idbGet, set as idbSet, del as idbDel, entries as idbEntries, createStore as createIdbStore } from 'idb-keyval';
 import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure';
 import * as nip04 from 'nostr-tools/nip04';
 import { Relay } from 'nostr-tools/relay';
@@ -66,16 +66,18 @@ function createStore({
   const connectedRelays = [];
   let relayConnectPromise = null;
 
-  // Debounce mechanism
-  let pendingUpdates = {};
+  // Debounce mechanism for sync
   let debounceTimer = null;
 
-  // Change listeners
+  // Change listeners and sync event listeners
   const changeListeners = [];
+  const syncEventListeners = [];
   
-  // Last sync timestamp (stored in a special meta key that won't be synced)
+  // Special meta keys (stored in a special meta key that won't be synced)
   const LAST_SYNC_KEY = '_nkvmeta_lastSync';
+  const LAST_PUBLISH_KEY = '_nkvmeta_lastPublish';
   let lastSyncTime = 0;
+  let lastPublishTime = 0;
 
   /**
    * Connect to relays if not already connected
@@ -120,44 +122,51 @@ function createStore({
   }
 
   /**
-   * Publish updates to Nostr relays
+   * Publish all data to Nostr relays
    */
-  async function publishToNostr(updates) {
+  async function publishToNostr() {
     await ensureRelayConnections();
     
-    if (Object.keys(updates).length === 0) return;
-
-    // Get the keys and values to publish
-    const keys = [];
-    const values = [];
-    const timestamps = [];
+    // Get all entries from the store (except meta entries)
+    const allEntries = await idbEntries(customStore);
     
-    // For each key in the updates, get its current stored value with metadata
-    for (const key of Object.keys(updates)) {
-      const storedEntry = await localGet(key);
-      if (storedEntry && storedEntry.meta) {
-        keys.push(key);
-        values.push(updates[key]);
-        timestamps.push(storedEntry.meta.lastModified);
+    // Filter out meta entries and build our data structure
+    const data = {};
+    
+    for (const [key, entry] of allEntries) {
+      // Skip internal meta keys
+      if (key.startsWith('_nkvmeta')) continue;
+      
+      if (entry && entry.meta) {
+        data[key] = {
+          value: entry.value,
+          lastModified: entry.meta.lastModified
+        };
       }
     }
 
-    const data = {
-      keys: keys,
-      values: values,
-      timestamps: timestamps
-    };
-
     console.log(`[DEBUG] Publishing to Nostr - Namespace: ${namespace}, AuthPubkey: ${authPubkey}`);
-    console.log(`[DEBUG] Keys being published:`, keys);
-    console.log(`[DEBUG] Values being published:`, values);
-    console.log(`[DEBUG] Timestamps being published:`, timestamps);
-
+    console.log(`[DEBUG] Publishing ${Object.keys(data).length} entries`);
+    console.log(`[DEBUG] Data structure being published:`, JSON.stringify(data, null, 2));
+    
     const encryptedContent = await encryptData(data);
 
+    try {
+      const lastPublishData = await localGet(LAST_PUBLISH_KEY);
+      if (lastPublishData && lastPublishData.value) {
+        lastPublishTime = lastPublishData.value;
+      }
+    } catch (error) {
+      console.error('Error loading last publish time:', error);
+    }
+    
+    // Ensure our timestamp is newer than our last publish
+    const currentTime = Math.floor(Date.now() / 1000);
+    const eventTime = Math.max(currentTime, lastPublishTime + 1);
+    
     const eventTemplate = {
       kind: 30078,
-      created_at: Math.floor(Date.now() / 1000),
+      created_at: eventTime,
       tags: [
         ["d", namespace], 
         ["a", `30078:${authPubkey}:${namespace}`], 
@@ -165,40 +174,98 @@ function createStore({
       ],
       content: encryptedContent
     };
+    
+    // Update our last publish time
+    await localSet(LAST_PUBLISH_KEY, {
+      value: eventTime,
+      meta: {
+        lastModified: Date.now()
+      }
+    });
 
     const signedEvent = finalizeEvent(eventTemplate, authSecretKey);
 
     // Publish to all connected relays
     const publishPromises = connectedRelays.map(relay => 
-      relay.publish(signedEvent).catch(err => 
-        console.error(`Failed to publish to ${relay.url}:`, err)
-      )
+      relay.publish(signedEvent).catch(err => {
+        if (err.message) {
+          if (err.message.includes("replaced: have newer event")) {
+            console.error(`ERROR: Relay ${relay.url} says it already has a newer version of this event from the same client (authPubkey: ${authPubkey})`);
+            console.error(`This should never happen! Event created_at: ${eventTemplate.created_at}, tags:`, JSON.stringify(eventTemplate.tags));
+          } else if (err.message.includes("rate-limited")) {
+            console.log(`Relay ${relay.url} rate-limited this publish request`);
+          } else {
+            console.error(`Failed to publish to ${relay.url}:`, err);
+          }
+        } else {
+          console.error(`Failed to publish to ${relay.url} with unknown error:`, err);
+        }
+        throw err;
+      })
     );
 
-    await Promise.allSettled(publishPromises);
+    try {
+      // Track results for better error handling
+      const results = await Promise.allSettled(publishPromises);
+      
+      // Check if we had at least one success
+      const anySuccess = results.some(r => r.status === 'fulfilled');
+      
+      if (anySuccess) {
+        // If we had at least one success, consider it a success
+        console.log(`Published successfully to at least one relay`);
+        
+        // Notify sync event listeners of success
+        syncEventListeners.forEach(listener => {
+          try {
+            listener({
+              source: 'local',
+              success: true,
+              changedKeys: Object.keys(data)
+            });
+          } catch (error) {
+            console.error('Error in sync event listener:', error);
+          }
+        });
+      } else {
+        // Real failure - all relays rejected for reasons other than "replaced"
+        console.error('All publish attempts failed:', results);
+        
+        // Notify sync event listeners of failure
+        syncEventListeners.forEach(listener => {
+          try {
+            listener({
+              source: 'local',
+              success: false,
+              error: 'All relays rejected the publish',
+              changedKeys: Object.keys(data)
+            });
+          } catch (listenerError) {
+            console.error('Error in sync event listener:', listenerError);
+          }
+        });
+        
+        // Throw a consolidated error
+        throw new Error('Failed to publish to any relay');
+      }
+    } catch (error) {
+      console.error('Error in publish process:', error);
+      throw error;
+    }
   }
 
   /**
-   * Process updates from debounce queue
+   * Schedule a sync with debounce
    */
-  function processDebounceQueue() {
-    const updates = { ...pendingUpdates };
-    pendingUpdates = {};
-    debounceTimer = null;
-    publishToNostr(updates);
-  }
-
-  /**
-   * Queue an update for debounced publishing
-   */
-  function queueUpdate(key, value) {
-    pendingUpdates[key] = value;
-    
+  function scheduleSync() {
     if (debounceTimer) {
       clearTimeout(debounceTimer);
     }
     
-    debounceTimer = setTimeout(processDebounceQueue, debounce);
+    debounceTimer = setTimeout(async () => {
+      debounceTimer = null;
+      await publishToNostr();
+    }, debounce);
   }
 
   /**
@@ -247,20 +314,24 @@ function createStore({
             }
 
             const decrypted = await decryptData(event.content);
-            if (!decrypted || !decrypted.keys || !decrypted.values || !decrypted.timestamps) {
+            if (!decrypted) {
               console.error(`[DEBUG] Failed to decrypt event or invalid format:`, decrypted);
               return;
             }
             
-            console.log(`[DEBUG] Decrypted keys:`, decrypted.keys);
-            console.log(`[DEBUG] Decrypted values:`, decrypted.values);
-            console.log(`[DEBUG] Decrypted timestamps:`, decrypted.timestamps);
+            console.log(`[DEBUG] Received ${Object.keys(decrypted).length} entries`);
+            console.log(`[DEBUG] Decrypted data structure:`, JSON.stringify(decrypted, null, 2));
+            
+            // Track which keys have changed for notifications
+            const changedKeys = [];
 
             // Update local storage with remote changes
-            for (let i = 0; i < decrypted.keys.length; i++) {
-              const key = decrypted.keys[i];
-              const value = decrypted.values[i];
-              const timestamp = decrypted.timestamps[i];
+            for (const [key, entry] of Object.entries(decrypted)) {
+              // Skip internal meta keys
+              if (key.startsWith('_nkvmeta')) continue;
+              
+              const value = entry.value;
+              const timestamp = entry.lastModified;
               
               // Get current value to check timestamp
               const current = await localGet(key);
@@ -282,6 +353,17 @@ function createStore({
                   });
                 }
                 
+                // Add to changed keys list
+                changedKeys.push(key);
+              }
+            }
+            
+            // Notify listeners of all changes at once
+            if (changedKeys.length > 0) {
+              for (const key of changedKeys) {
+                const entry = await localGet(key);
+                const value = entry ? entry.value : null;
+                
                 // Notify listeners
                 changeListeners.forEach(listener => {
                   try {
@@ -291,6 +373,19 @@ function createStore({
                   }
                 });
               }
+              
+              // Notify sync event listeners
+              syncEventListeners.forEach(listener => {
+                try {
+                  listener({
+                    source: 'remote',
+                    pubkey: event.pubkey,
+                    changedKeys
+                  });
+                } catch (error) {
+                  console.error('Error in sync event listener:', error);
+                }
+              });
             }
           } catch (error) {
             console.error('Error processing remote event:', error);
@@ -300,7 +395,7 @@ function createStore({
     });
   }
 
-  // Initialize by loading the last sync time, then start subscription
+  // Initialize by loading the last sync and publish times, then start subscription
   (async function initialize() {
     try {
       const syncData = await localGet(LAST_SYNC_KEY);
@@ -308,8 +403,14 @@ function createStore({
         lastSyncTime = syncData.value;
         console.log(`Loaded last sync time: ${new Date(lastSyncTime * 1000).toISOString()}`);
       }
+      
+      const publishData = await localGet(LAST_PUBLISH_KEY);
+      if (publishData && publishData.value) {
+        lastPublishTime = publishData.value;
+        console.log(`Loaded last publish time: ${new Date(lastPublishTime * 1000).toISOString()}`);
+      }
     } catch (error) {
-      console.error('Error loading last sync time:', error);
+      console.error('Error loading meta', error);
     }
     
     // Start subscription
@@ -346,8 +447,8 @@ function createStore({
         }
       });
 
-      // Only send the actual value to Nostr, metadata is handled internally
-      queueUpdate(key, value);
+      // Schedule a sync
+      scheduleSync();
     },
 
     /**
@@ -357,7 +458,7 @@ function createStore({
      */
     async del(key) {
       await localDel(key);
-      queueUpdate(key, null);
+      scheduleSync();
     },
 
     /**
@@ -371,6 +472,21 @@ function createStore({
         const index = changeListeners.indexOf(callback);
         if (index !== -1) {
           changeListeners.splice(index, 1);
+        }
+      };
+    },
+    
+    /**
+     * Register a callback for sync events (both local and remote)
+     * @param {Function} callback Function called with sync event details
+     * @returns {Function} Function to remove the listener
+     */
+    onSync(callback) {
+      syncEventListeners.push(callback);
+      return () => {
+        const index = syncEventListeners.indexOf(callback);
+        if (index !== -1) {
+          syncEventListeners.splice(index, 1);
         }
       };
     },
@@ -398,7 +514,7 @@ function createStore({
     },
 
     /**
-     * Force immediate sync of any pending updates
+     * Force immediate sync of all data
      * @returns {Promise<void>}
      */
     async flush() {
@@ -407,7 +523,7 @@ function createStore({
         debounceTimer = null;
       }
       
-      await processDebounceQueue();
+      await publishToNostr();
     },
 
     /**
