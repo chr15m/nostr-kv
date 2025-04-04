@@ -9,7 +9,7 @@ useWebSocketImplementation(WebSocket);
 // Import necessary tools
 import { generateSecretKey, getPublicKey } from 'nostr-tools/pure';
 import * as nip19 from 'nostr-tools/nip19';
-import { createStore } from './index.js';
+import { createStore } from '../index.js';
 
 // Test configuration
 const TEST_NAMESPACE = 'rapidfire-test-' + Math.floor(Math.random() * 1000000);
