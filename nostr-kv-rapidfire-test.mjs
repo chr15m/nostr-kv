@@ -1,0 +1,166 @@
+// Import fake-indexeddb polyfill first
+import 'fake-indexeddb/auto';
+
+// Import WebSocket implementation for Node.js environment
+import { useWebSocketImplementation } from 'nostr-tools/relay';
+import WebSocket from 'ws';
+useWebSocketImplementation(WebSocket);
+
+// Import necessary tools
+import { generateSecretKey, getPublicKey } from 'nostr-tools/pure';
+import * as nip19 from 'nostr-tools/nip19';
+import { createStore } from './index.js';
+
+// Test configuration
+const TEST_NAMESPACE = 'rapidfire-test-' + Math.floor(Math.random() * 1000000);
+const TEST_RELAY = 'wss://relay.damus.io';
+const SYNC_DELAY = 3000; // Time to wait for sync to happen
+
+async function runTest() {
+  console.log(`Starting rapidfire test with namespace: ${TEST_NAMESPACE}`);
+  
+  // Generate a shared encryption key (kvNsec)
+  const kvSecretKey = generateSecretKey();
+  const kvNsec = nip19.nsecEncode(kvSecretKey);
+  const kvPubkey = getPublicKey(kvSecretKey);
+  
+  console.log(`Using shared kvPubkey: ${kvPubkey}`);
+  
+  // Create two different auth keys (one for each client)
+  const authSecretKey1 = generateSecretKey();
+  const authSecretKey2 = generateSecretKey();
+  
+  const authPubkey1 = getPublicKey(authSecretKey1);
+  const authPubkey2 = getPublicKey(authSecretKey2);
+  
+  console.log(`Client 1 authPubkey: ${authPubkey1} (will make rapid changes)`);
+  console.log(`Client 2 authPubkey: ${authPubkey2} (will receive changes)`);
+  
+  // Create two stores with different debounce settings and isolated databases
+  const store1 = createStore({
+    namespace: TEST_NAMESPACE,
+    authNsec: nip19.nsecEncode(authSecretKey1),
+    kvNsec: kvNsec,
+    relays: [TEST_RELAY],
+    debounce: 500, // Use a longer debounce for testing
+    dbName: `client1-${TEST_NAMESPACE}` // Unique database name for client 1
+  });
+  
+  const store2 = createStore({
+    namespace: TEST_NAMESPACE,
+    authNsec: nip19.nsecEncode(authSecretKey2),
+    kvNsec: kvNsec,
+    relays: [TEST_RELAY],
+    debounce: 100, // Use a small debounce for testing
+    dbName: `client2-${TEST_NAMESPACE}` // Unique database name for client 2
+  });
+  
+  // Set up change listener for store2
+  const changedKeys = new Set();
+  const removeListener = store2.onChange((key, value) => {
+    console.log(`Client 2 received change for key "${key}": ${JSON.stringify(value)}`);
+    changedKeys.add(key);
+  });
+  
+  try {
+    // Test: Make rapid changes to multiple keys
+    console.log("\n--- Test: Rapidfire changes to test debounce and queuing ---");
+    
+    const baseKey = 'rapid-key-';
+    const numKeys = 10;
+    const expectedKeys = [];
+    
+    console.log(`Making ${numKeys} rapid changes...`);
+    
+    // Make rapid changes to multiple keys
+    for (let i = 0; i < numKeys; i++) {
+      const key = `${baseKey}${i}`;
+      expectedKeys.push(key);
+      const value = { message: `Value ${i}`, timestamp: Date.now() };
+      
+      // Don't await here - we want to make changes rapidly
+      store1.set(key, value);
+      
+      // Small delay to simulate rapid but not simultaneous changes
+      await new Promise(resolve => setTimeout(resolve, 20));
+    }
+    
+    // Wait a moment but don't flush - let the debounce handle it
+    console.log("Waiting for debounce to trigger...");
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    
+    // Wait for sync to happen
+    console.log(`Waiting ${SYNC_DELAY}ms for sync...`);
+    await new Promise(resolve => setTimeout(resolve, SYNC_DELAY));
+    
+    // Check if all keys were received by Client 2
+    console.log(`Client 2 received changes for ${changedKeys.size} keys`);
+    
+    let allKeysReceived = true;
+    for (const key of expectedKeys) {
+      const value = await store2.get(key);
+      if (!value) {
+        console.log(`❌ Missing value for key: ${key}`);
+        allKeysReceived = false;
+      }
+    }
+    
+    if (allKeysReceived) {
+      console.log("✅ TEST PASSED: All rapidfire changes were successfully synced");
+    } else {
+      console.log("❌ TEST FAILED: Some rapidfire changes were not synced");
+    }
+    
+    // Test: Update the same key multiple times in rapid succession
+    console.log("\n--- Test: Multiple updates to the same key ---");
+    
+    const singleKey = 'single-key';
+    const finalValue = { message: "Final value", timestamp: Date.now() };
+    
+    // Update the same key multiple times rapidly
+    for (let i = 0; i < 5; i++) {
+      const value = { message: `Intermediate value ${i}`, timestamp: Date.now() };
+      await store1.set(singleKey, value);
+      // Small delay between updates
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    
+    // Set the final value
+    await store1.set(singleKey, finalValue);
+    
+    // Wait for sync to happen
+    console.log(`Waiting ${SYNC_DELAY}ms for sync...`);
+    await new Promise(resolve => setTimeout(resolve, SYNC_DELAY));
+    
+    // Check if Client 2 has the final value
+    const receivedValue = await store2.get(singleKey);
+    console.log(`Client 2 final value for "${singleKey}":`, receivedValue);
+    
+    if (receivedValue && receivedValue.message === finalValue.message) {
+      console.log("✅ TEST PASSED: Final value was correctly synced");
+    } else {
+      console.log("❌ TEST FAILED: Final value was not correctly synced");
+    }
+    
+    // Clean up
+    removeListener();
+    
+    console.log("\n--- All tests completed ---");
+    
+  } catch (error) {
+    console.error("Test failed with error:", error);
+  } finally {
+    // Close connections
+    await store1.close();
+    await store2.close();
+    
+    console.log("Test completed, connections closed.");
+    process.exit(0);
+  }
+}
+
+// Run the test
+runTest().catch(err => {
+  console.error("Fatal error:", err);
+  process.exit(1);
+});

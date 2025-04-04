@@ -36,13 +36,14 @@ async function runTest() {
   console.log(`Client 1 authPubkey: ${authPubkey1}`);
   console.log(`Client 2 authPubkey: ${authPubkey2}`);
   
-  // Create two stores with the same kvNsec but different authNsec
+  // Create two stores with the same kvNsec but different authNsec and isolated databases
   const store1 = createStore({
     namespace: TEST_NAMESPACE,
     authNsec: nip19.nsecEncode(authSecretKey1),
     kvNsec: kvNsec,
     relays: [TEST_RELAY],
-    debounce: 100 // Use a small debounce for testing
+    debounce: 100, // Use a small debounce for testing
+    dbName: `client1-${TEST_NAMESPACE}` // Unique database name for client 1
   });
   
   const store2 = createStore({
@@ -50,7 +51,8 @@ async function runTest() {
     authNsec: nip19.nsecEncode(authSecretKey2),
     kvNsec: kvNsec,
     relays: [TEST_RELAY],
-    debounce: 100 // Use a small debounce for testing
+    debounce: 100, // Use a small debounce for testing
+    dbName: `client2-${TEST_NAMESPACE}` // Unique database name for client 2
   });
   
   // Set up change listener for store2
