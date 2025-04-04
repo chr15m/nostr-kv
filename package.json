@@ -5,7 +5,11 @@
   "type": "module",
   "main": "index.js",
   "scripts": {
-    "test": "node nostr-kv-sync-test.mjs"
+    "test": "node nostr-kv-sync-test.mjs",
+    "test:offline": "node nostr-kv-offline-test.mjs",
+    "test:rapidfire": "node nostr-kv-rapidfire-test.mjs",
+    "test:offline-changes": "node nostr-kv-offline-changes-test.mjs",
+    "test:all": "npm run test && npm run test:offline && npm run test:rapidfire && npm run test:offline-changes"
   },
   "dependencies": {
     "fake-indexeddb": "^6.0.0",
