@@ -4,7 +4,7 @@ A synchronized key-value store for browser applications that persists data to No
 
 ## Overview
 
-nostr-kv is a browser library that provides a key-value storage system with seamless synchronization across multiple devices. It combines the speed of local IndexedDB storage with the persistence and availability of Nostr's decentralized network.
+nostr-kv is a browser library that provides a key-value storage system with seamless synchronization across multiple devices. It combines the speed of local IndexedDB storage with the persistence and availability of Nostr's decentralized network. It implements [NIP-78](https://github.com/nostr-protocol/nips/blob/master/78.md) for arbitrary custom app data storage.
 
 ## Features
 
@@ -52,7 +52,7 @@ const store = createStore({
   authNsec: 'your-auth-nsec', // Optional: will be generated if not provided
   kvNsec: 'your-kv-nsec',     // Optional: will be generated if not provided
   relays: ['wss://relay.example.com'], // Optional: will use default relays if not provided
-  debounce: 1000, // Optional: milliseconds to wait before syncing rapid changes (default: 500)
+  debounce: 1000, // Optional: milliseconds to wait before syncing rapid changes (default: 1010)
   dbName: 'custom-db-name', // Optional: custom IndexedDB database name
   debug: false // Optional: enable debug logging (default: false)
 });
@@ -71,6 +71,10 @@ await store.del('username');
 store.onChange((key, newValue) => {
   console.log(`Key ${key} changed to ${newValue}`);
 });
+
+// Get the public keys used by this store
+const { authPubkey, kvPubkey } = store.getPublicKeys();
+console.log(`Auth pubkey: ${authPubkey}, KV pubkey: ${kvPubkey}`);
 ```
 
 ## Benefits
