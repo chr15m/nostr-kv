@@ -20,6 +20,7 @@ nostr-kv is a browser library that provides a key-value storage system with seam
 - The fastest you can do sync'ed updates is 1 every second because event time is a unix timestamp (debounce handles this automatically).
 - Total data size in the kv should be smaller than 100kb or relays will time-out when you try to write.
 - Relays will rate-limit updates that happen too frequently, independently of the 1 second limit above.
+- Updates can take multiple seconds to propagate on busy relays.
 
 ## How It Works
 
