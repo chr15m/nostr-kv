@@ -72,9 +72,13 @@ store.onChange((key, newValue) => {
   console.log(`Key ${key} changed to ${newValue}`);
 });
 
-// Get the public keys used by this store
+// Get the public keys used by this store (as NIP-19 encoded strings)
 const { authPubkey, kvPubkey } = store.getPublicKeys();
-console.log(`Auth pubkey: ${authPubkey}, KV pubkey: ${kvPubkey}`);
+console.log(`Auth npub: ${authPubkey}, KV npub: ${kvPubkey}`);
+
+// Get the secret keys as NIP-19 encoded strings (be careful with these!)
+const { authSecretKey, kvSecretKey } = store.getSecretKeys();
+console.log(`Auth nsec: ${authSecretKey}, KV nsec: ${kvSecretKey}`);
 ```
 
 ## Benefits

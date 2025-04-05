@@ -491,19 +491,19 @@ function createStore({
     },
 
     /**
-     * Get the public keys used by this store
-     * @returns {Object} Object containing authPubkey and kvPubkey
+     * Get the public keys used by this store as NIP-19 encoded strings
+     * @returns {Object} Object containing authPubkey and kvPubkey as NIP-19 npub strings
      */
     getPublicKeys() {
       return {
-        authPubkey,
-        kvPubkey
+        authPubkey: nip19.npubEncode(authPubkey),
+        kvPubkey: nip19.npubEncode(kvPubkey)
       };
     },
 
     /**
-     * Get the secret keys used by this store (careful with this!)
-     * @returns {Object} Object containing authSecretKey and kvSecretKey
+     * Get the secret keys used by this store as NIP-19 encoded strings (careful with this!)
+     * @returns {Object} Object containing authSecretKey and kvSecretKey as NIP-19 nsec strings
      */
     getSecretKeys() {
       return {
