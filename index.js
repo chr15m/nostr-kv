@@ -5,6 +5,7 @@ import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure
 import * as nip04 from 'nostr-tools/nip04';
 import { Relay } from 'nostr-tools/relay';
 import * as nip19 from 'nostr-tools/nip19';
+import createDebug from 'debug';
 
 // Default relays that are known to be reliable
 const DEFAULT_RELAYS = [
@@ -58,26 +59,14 @@ function createStore({
   const authPubkey = getPublicKey(authSecretKey);
   const kvPubkey = getPublicKey(kvSecretKey);
 
-  /**
-   * Debug logging function that only logs when debug is enabled
-   * @param {...any} args Arguments to log
-   */
-  function log(...args) {
-    if (debug) {
-      const shortAuthKey = authPubkey.substring(0, 8);
-      console.log(`[DEBUG ${shortAuthKey}]`, ...args);
-    }
-  }
-
-  /**
-   * Debug error logging function that only logs when debug is enabled
-   * @param {...any} args Arguments to log
-   */
-  function logError(...args) {
-    if (debug) {
-      const shortAuthKey = authPubkey.substring(0, 8);
-      console.error(`[DEBUG ${shortAuthKey}]`, ...args);
-    }
+  // Create debug loggers with namespace
+  const shortAuthKey = authPubkey.substring(0, 8);
+  const log = createDebug(`nostr-kv:${namespace}:${shortAuthKey}`);
+  const logError = createDebug(`nostr-kv:${namespace}:${shortAuthKey}:error`);
+  
+  // Enable debug logging if requested
+  if (debug) {
+    createDebug.enable(`nostr-kv:${namespace}:${shortAuthKey}*`);
   }
 
   // Create a custom store for this namespace
@@ -115,7 +104,7 @@ function createStore({
           connectedRelays.push(relay);
           return relay;
         } catch (error) {
-          console.error(`Failed to connect to relay ${url}:`, error);
+          logError('Failed to connect to relay %s: %O', url, error);
           return null;
         }
       })
@@ -139,7 +128,7 @@ function createStore({
       const decrypted = await nip04.decrypt(kvSecretKey, kvPubkey, encryptedData);
       return JSON.parse(decrypted);
     } catch (error) {
-      console.error('Failed to decrypt data:', error);
+      logError('Failed to decrypt  %O', error);
       return null;
     }
   }
@@ -168,9 +157,9 @@ function createStore({
       }
     }
 
-    log(`Publishing to Nostr - Namespace: ${namespace}, AuthPubkey: ${authPubkey}`);
-    log(`Publishing ${Object.keys(data).length} entries`);
-    log(`Data structure being published:`, JSON.stringify(data, null, 2));
+    log('Publishing to Nostr - Namespace: %s, AuthPubkey: %s', namespace, authPubkey);
+    log('Publishing %d entries', Object.keys(data).length);
+    log('Data structure being published: %O', data);
 
     const encryptedContent = await encryptData(data);
 
@@ -204,15 +193,17 @@ function createStore({
       relay.publish(signedEvent).catch(err => {
         if (err.message) {
           if (err.message.includes("replaced: have newer event")) {
-            console.error(`ERROR: Relay ${relay.url} says it already has a newer version of this event from the same client (authPubkey: ${authPubkey})`);
-            console.error(`This should never happen! Event created_at: ${eventTemplate.created_at}, tags:`, JSON.stringify(eventTemplate.tags));
+            logError('Relay %s says it already has a newer version of this event from the same client (authPubkey: %s)', 
+              relay.url, authPubkey);
+            logError('This should never happen! Event created_at: %d, tags: %O', 
+              eventTemplate.created_at, eventTemplate.tags);
           } else if (err.message.includes("rate-limited")) {
-            console.log(`Relay ${relay.url} rate-limited this publish request`);
+            log('Relay %s rate-limited this publish request', relay.url);
           } else {
-            console.error(`Failed to publish to ${relay.url}:`, err);
+            logError('Failed to publish to %s: %O', relay.url, err);
           }
         } else {
-          console.error(`Failed to publish to ${relay.url} with unknown error:`, err);
+          logError('Failed to publish to %s with unknown error: %O', relay.url, err);
         }
         throw err;
       })
@@ -227,7 +218,7 @@ function createStore({
 
       if (anySuccess) {
         // If we had at least one success, consider it a success
-        console.log(`Published successfully to at least one relay`);
+        log('Published successfully to at least one relay');
 
         // Notify sync event listeners of success
         syncEventListeners.forEach(listener => {
@@ -238,12 +229,12 @@ function createStore({
               changedKeys: Object.keys(data)
             });
           } catch (error) {
-            console.error('Error in sync event listener:', error);
+            logError('Error in sync event listener: %O', error);
           }
         });
       } else {
         // Real failure - all relays rejected for reasons other than "replaced"
-        console.error('All publish attempts failed:', results);
+        logError('All publish attempts failed: %O', results);
 
         // Notify sync event listeners of failure
         syncEventListeners.forEach(listener => {
@@ -255,7 +246,7 @@ function createStore({
               changedKeys: Object.keys(data)
             });
           } catch (listenerError) {
-            console.error('Error in sync event listener:', listenerError);
+            logError('Error in sync event listener: %O', listenerError);
           }
         });
 
@@ -263,7 +254,7 @@ function createStore({
         throw new Error('Failed to publish to any relay');
       }
     } catch (error) {
-      console.error('Error in publish process:', error);
+      logError('Error in publish process: %O', error);
       throw error;
     }
   }
@@ -311,9 +302,9 @@ function createStore({
             const dTag = event.tags.find(tag => tag[0] === 'd');
             if (!dTag || dTag[1] !== namespace) return;
 
-            log(`Received event from pubkey: ${event.pubkey}`);
-            log(`Event created_at: ${new Date(event.created_at * 1000).toISOString()}`);
-            log(`Event tags:`, event.tags);
+            log('Received event from pubkey: %s', event.pubkey);
+            log('Event created_at: %s', new Date(event.created_at * 1000).toISOString());
+            log('Event tags: %O', event.tags);
 
             // Update last sync time to this event's created_at
             if (event.created_at > lastSyncTime) {
@@ -329,12 +320,12 @@ function createStore({
 
             const decrypted = await decryptData(event.content);
             if (!decrypted) {
-              logError(`Failed to decrypt event or invalid format:`, decrypted);
+              logError('Failed to decrypt event or invalid format: %O', decrypted);
               return;
             }
 
-            log(`Received ${Object.keys(decrypted).length} entries`);
-            log(`Decrypted data structure:`, JSON.stringify(decrypted, null, 2));
+            log('Received %d entries', Object.keys(decrypted).length);
+            log('Decrypted data structure: %O', decrypted);
 
             // Track which keys have changed for notifications
             const changedKeys = [];
@@ -383,7 +374,7 @@ function createStore({
                   try {
                     listener(key, value);
                   } catch (error) {
-                    console.error('Error in change listener:', error);
+                    logError('Error in change listener: %O', error);
                   }
                 });
               }
@@ -392,7 +383,7 @@ function createStore({
               // This makes onSync only fire for outgoing publishes
             }
           } catch (error) {
-            console.error('Error processing remote event:', error);
+            logError('Error processing remote event: %O', error);
           }
         }
       });
@@ -405,11 +396,11 @@ function createStore({
       const syncData = await localGet(LAST_SYNC_KEY);
       if (syncData && syncData.value) {
         lastSyncTime = syncData.value;
-        log(`Loaded last sync time: ${new Date(lastSyncTime * 1000).toISOString()}`);
+        log('Loaded last sync time: %s', new Date(lastSyncTime * 1000).toISOString());
       }
 
     } catch (error) {
-      console.error('Error loading meta', error);
+      logError('Error loading meta: %O', error);
     }
 
     // Start subscription
