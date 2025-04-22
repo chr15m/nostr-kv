@@ -37,7 +37,7 @@ async function runTest() {
   console.log("\n--- Testing store interface ---");
   
   const expectedMethods = [
-    'get', 'set', 'del', 'onChange', 'onSync', 'close'
+    'get', 'set', 'del', 'onChange', 'sync', 'close'
   ];
   
   let allMethodsPresent = true;

@@ -5,11 +5,14 @@ import { Relay } from 'nostr-tools/relay';
 import * as nip19 from 'nostr-tools/nip19';
 import createDebug from 'debug';
 
+// TODO: use a relayPool instead of tracking relays manually in here
+// TODO: del should set a special key rather than actually deleting
+
 // Default relays that are known to be reliable
 const DEFAULT_RELAYS = [
   'wss://relay.damus.io',
   'wss://relay.nostr.band',
-  'wss://nos.lol'
+  // 'wss://nos.lol'
 ];
 
 // Default debounce time in milliseconds
@@ -83,9 +86,8 @@ function createStore({
   let syncPromise = null;
   let syncResolve = null;
 
-  // Change listeners and sync event listeners
+  // Change listeners
   const changeListeners = [];
-  const syncEventListeners = [];
 
   // Special meta keys (stored in a special meta key that won't be synced)
   const LAST_SYNC_KEY = '_nkvmeta_lastSync';
@@ -211,35 +213,10 @@ function createStore({
         // If we had at least one success, consider it a success
         log('Published successfully to at least one relay');
 
-        // Notify sync event listeners of success
-        syncEventListeners.forEach(listener => {
-          try {
-            listener({
-              source: 'local',
-              success: true,
-              changedKeys: Object.keys(data)
-            });
-          } catch (error) {
-            logError('Error in sync event listener: %O', error);
-          }
-        });
       } else {
         // Real failure - all relays rejected for reasons other than "replaced"
         logError('All publish attempts failed: %O', results);
 
-        // Notify sync event listeners of failure
-        syncEventListeners.forEach(listener => {
-          try {
-            listener({
-              source: 'local',
-              success: false,
-              error: 'All relays rejected the publish',
-              changedKeys: Object.keys(data)
-            });
-          } catch (listenerError) {
-            logError('Error in sync event listener: %O', listenerError);
-          }
-        });
 
         // Throw a consolidated error
         throw new Error('Failed to publish to any relay');
@@ -387,8 +364,6 @@ function createStore({
                 });
               }
 
-              // We don't trigger sync events for remote changes anymore
-              // This makes onSync only fire for outgoing publishes
             }
           } catch (error) {
             logError('Error processing remote event: %O', error);
@@ -477,20 +452,6 @@ function createStore({
       };
     },
 
-    /**
-     * Register a callback for sync events (both local and remote)
-     * @param {Function} callback Function called with sync event details
-     * @returns {Function} Function to remove the listener
-     */
-    onSync(callback) {
-      syncEventListeners.push(callback);
-      return () => {
-        const index = syncEventListeners.indexOf(callback);
-        if (index !== -1) {
-          syncEventListeners.splice(index, 1);
-        }
-      };
-    },
 
     /**
      * Close all relay connections
@@ -508,8 +469,6 @@ function createStore({
      * @returns {Promise<void>} Promise that resolves when sync is complete
      */
     async sync() {
-      // If there's an ongoing sync, wait for it,
-      // otherwise resolve immediately
       return syncPromise || Promise.resolve();
     },
 
