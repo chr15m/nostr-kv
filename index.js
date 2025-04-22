@@ -253,7 +253,10 @@ function createStore({
   /**
    * Schedule a sync with debounce
    */
-  function scheduleSync() {
+  async function scheduleSync(after) {
+    // wait for the local update
+    await after;
+
     if (debounceTimer) {
       clearTimeout(debounceTimer);
     }
@@ -421,7 +424,7 @@ function createStore({
       const timestamp = Date.now();
 
       // Store the value with metadata (timestamp is an implementation detail)
-      await localSet(key, {
+      const setp = localSet(key, {
         value,
         meta: {
           lastModified: timestamp
@@ -429,7 +432,8 @@ function createStore({
       });
 
       // Schedule a sync
-      scheduleSync();
+      scheduleSync(setp);
+      return setp;
     },
 
     /**
@@ -438,8 +442,9 @@ function createStore({
      * @returns {Promise<void>}
      */
     async del(key) {
-      await localDel(key);
-      scheduleSync();
+      const delp = localDel(key);
+      scheduleSync(delp);
+      return delp;
     },
 
     /**
