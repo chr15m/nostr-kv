@@ -25,7 +25,7 @@ const DEFAULT_DEBOUNCE = 1010;
  * @param {string} [options.authNsec] Secret key for publishing (will be generated if not provided)
  * @param {string} [options.kvNsec] Secret key for encryption (will be generated if not provided)
  * @param {string[]} [options.relays] Array of relay URLs (defaults to predefined list)
- * @param {number} [options.debounce] Debounce time in ms for rapid updates (default: 500)
+ * @param {number} [options.debounce] Debounce time in ms for rapid updates (default: 1010)
  * @param {string} [options.dbName] Custom IndexedDB database name (useful for testing)
  * @param {boolean} [options.debug] Enable debug logging (default: false)
  * @returns {Object} Store interface with get, set, del methods
@@ -44,17 +44,17 @@ function createStore({
   }
 
   // Generate keys if not provided
-  const authSecretKey = authNsec
-    ? (typeof authNsec === 'string' && authNsec.startsWith('nsec')
-        ? nip19.decode(authNsec).data
-        : authNsec)
-    : generateSecretKey();
+  const authSecretKey = authNsec ?
+    (typeof authNsec === 'string' && authNsec.startsWith('nsec') ?
+      nip19.decode(authNsec).data :
+      authNsec) :
+    generateSecretKey();
 
-  const kvSecretKey = kvNsec
-    ? (typeof kvNsec === 'string' && kvNsec.startsWith('nsec')
-        ? nip19.decode(kvNsec).data
-        : kvNsec)
-    : generateSecretKey();
+  const kvSecretKey = kvNsec ?
+    (typeof kvNsec === 'string' && kvNsec.startsWith('nsec') ?
+      nip19.decode(kvNsec).data :
+      kvNsec) :
+    generateSecretKey();
 
   const authPubkey = getPublicKey(authSecretKey);
   const kvPubkey = getPublicKey(kvSecretKey);
@@ -163,14 +163,6 @@ function createStore({
 
     const encryptedContent = await encryptData(data);
 
-    // Find the maximum lastModified timestamp from all entries
-    let maxLastModified = 0;
-    for (const [key, entry] of Object.entries(data)) {
-      if (entry.lastModified > maxLastModified) {
-        maxLastModified = entry.lastModified;
-      }
-    }
-
     // Convert to seconds and ensure it's newer than current time
     const currentTime = Math.floor(Date.now() / 1000);
 
@@ -184,7 +176,6 @@ function createStore({
       ],
       content: encryptedContent
     };
-
 
     const signedEvent = finalizeEvent(eventTemplate, authSecretKey);
 
