@@ -82,6 +82,8 @@ function createStore({
 
   // Debounce mechanism for sync
   let debounceTimer = null;
+  let syncPromise = null;
+  let syncResolve = null;
 
   // Change listeners and sync event listeners
   const changeListeners = [];
@@ -247,6 +249,13 @@ function createStore({
     } catch (error) {
       logError('Error in publish process: %O', error);
       throw error;
+    } finally {
+      // Resolve the sync promise
+      if (syncResolve) {
+        syncResolve();
+        syncPromise = null;
+        syncResolve = null;
+      }
     }
   }
 
@@ -254,6 +263,13 @@ function createStore({
    * Schedule a sync with debounce
    */
   async function scheduleSync(after) {
+    // Create a new sync promise if one doesn't exist
+    if (!syncPromise) {
+      syncPromise = new Promise(resolve => {
+        syncResolve = resolve;
+      });
+    }
+    
     // wait for the local update
     await after;
 
@@ -489,16 +505,13 @@ function createStore({
     },
 
     /**
-     * Force immediate sync of all data
-     * @returns {Promise<void>}
+     * Wait for any pending sync to complete
+     * @returns {Promise<void>} Promise that resolves when sync is complete
      */
-    async flush() {
-      if (debounceTimer) {
-        clearTimeout(debounceTimer);
-        debounceTimer = null;
-      }
-
-      await publishToNostr();
+    async sync() {
+      // If there's an ongoing sync, wait for it,
+      // otherwise resolve immediately
+      return syncPromise || Promise.resolve();
     },
 
     /**
