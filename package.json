@@ -9,7 +9,8 @@
     "test:offline": "node tests/offline-test.mjs",
     "test:rapidfire": "node tests/rapidfire-changes.mjs",
     "test:offline-changes": "node tests/offline-changes.mjs",
-    "test:all": "npm run test && npm run test:offline && npm run test:rapidfire && npm run test:offline-changes"
+    "test:all": "npm run test && npm run test:offline && npm run test:rapidfire && npm run test:offline-changes",
+    "lint": "jshint index.js tests/*"
   },
   "dependencies": {
     "debug": "^4.4.0",
@@ -26,5 +27,8 @@
     "sync",
     "indexeddb"
   ],
-  "license": "MIT"
+  "license": "MIT",
+  "jshintConfig": {
+    "esversion": 8
+  }
 }

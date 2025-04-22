@@ -1,5 +1,3 @@
-/* jshint esversion: 8 */
-
 import { get as idbGet, set as idbSet, del as idbDel, entries as idbEntries, createStore as createIdbStore } from 'idb-keyval';
 import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure';
 import * as nip04 from 'nostr-tools/nip04';
@@ -457,6 +455,7 @@ function createStore({
      * @param {string} key The key to delete
      * @returns {Promise<void>}
      */
+    // TODO: delete should insert a special key instead of value
     async del(key) {
       const delp = localDel(key);
       scheduleSync(delp);
