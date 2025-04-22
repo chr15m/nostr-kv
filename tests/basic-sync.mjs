@@ -16,6 +16,8 @@ const TEST_NAMESPACE = 'sync-test-' + Math.floor(Math.random() * 1000000);
 const TEST_RELAY = 'wss://relay.damus.io';
 const SYNC_DELAY = 10000; // Maximum time to wait for sync to happen
 
+// Remove debug code
+
 async function runTest() {
   log(`Starting sync test with namespace: ${TEST_NAMESPACE}`);
 
@@ -79,15 +81,12 @@ async function runTest() {
     await store1.set(testKey, testValue);
 
     // Wait for sync to happen
-    log(`Waiting for sync (max ${SYNC_DELAY}ms)...`);
-    await new Promise((resolve) => {
-      const timeout = setTimeout(resolve, SYNC_DELAY);
-      const unsubscribe = store2.onSync(() => {
-        clearTimeout(timeout);
-        unsubscribe();
-        resolve();
-      });
-    });
+    log(`Waiting for sync...`);
+    await store1.sync();
+    
+    // Give some time for the relay to propagate the event to client 2
+    log(`Waiting for relay propagation (max ${SYNC_DELAY}ms)...`);
+    await new Promise(resolve => setTimeout(resolve, SYNC_DELAY));
 
     // Client 2 should have received the change via the onChange handler
     // Now verify by reading directly
@@ -121,15 +120,12 @@ async function runTest() {
     await store2.set(testKey2, testValue2);
 
     // Wait for sync to happen
-    log(`Waiting for sync (max ${SYNC_DELAY}ms)...`);
-    await new Promise((resolve) => {
-      const timeout = setTimeout(resolve, SYNC_DELAY);
-      const unsubscribe = store1.onSync(() => {
-        clearTimeout(timeout);
-        unsubscribe();
-        resolve();
-      });
-    });
+    log(`Waiting for sync...`);
+    await store2.sync();
+    
+    // Give some time for the relay to propagate the event to client 1
+    log(`Waiting for relay propagation (max ${SYNC_DELAY}ms)...`);
+    await new Promise(resolve => setTimeout(resolve, SYNC_DELAY));
 
     // Client 1 should have received the change
     const receivedValue2 = await store1.get(testKey2);
@@ -160,26 +156,16 @@ async function runTest() {
     await store2.set(conflictKey, value2);
 
     // Wait for client1 to publish its changes
-    log(`Waiting for client1 to publish (max ${SYNC_DELAY}ms)...`);
-    await new Promise((resolve) => {
-      const timeout = setTimeout(resolve, SYNC_DELAY);
-      const unsubscribe = store1.onSync(() => {
-        clearTimeout(timeout);
-        unsubscribe();
-        resolve();
-      });
-    });
+    log(`Waiting for client1 to publish...`);
+    await store1.sync();
 
     // Wait for client2 to publish its changes
-    log(`Waiting for client2 to publish (max ${SYNC_DELAY}ms)...`);
-    await new Promise((resolve) => {
-      const timeout = setTimeout(resolve, SYNC_DELAY);
-      const unsubscribe = store2.onSync(() => {
-        clearTimeout(timeout);
-        unsubscribe();
-        resolve();
-      });
-    });
+    log(`Waiting for client2 to publish...`);
+    await store2.sync();
+    
+    // Give some time for the relay to propagate the events between clients
+    log(`Waiting for relay propagation (max ${SYNC_DELAY}ms)...`);
+    await new Promise(resolve => setTimeout(resolve, SYNC_DELAY));
 
     // Wait for client1 to receive client2's changes
     log(`Waiting for client1 to receive client2's changes (max ${SYNC_DELAY}ms)...`);
