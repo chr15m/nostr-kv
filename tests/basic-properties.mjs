@@ -91,6 +91,20 @@ async function runTest() {
     console.log("❌ store.keys() doesn't have the expected structure");
   }
 
+  // Test that sync() resolves immediately when there's no pending sync
+  console.log("\n--- Testing sync() with no pending sync ---");
+  const startTime = Date.now();
+  await store.sync();
+  const endTime = Date.now();
+  const elapsed = endTime - startTime;
+  
+  console.log(`sync() resolved in ${elapsed}ms`);
+  if (elapsed < 100) {
+    console.log("✅ sync() resolved immediately when no sync was pending");
+  } else {
+    console.log("❌ sync() took too long to resolve when no sync was pending");
+  }
+
   // Test basic storage functionality
   console.log("\n--- Testing basic storage ---");
   const testKey = 'test-key';
