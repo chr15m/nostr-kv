@@ -1,5 +1,5 @@
-// Check if we're in a Node.js environment with fake-indexeddb
-// The polyfill should be imported before this file
+/* jshint esversion: 8 */
+
 import { get as idbGet, set as idbSet, del as idbDel, entries as idbEntries, createStore as createIdbStore } from 'idb-keyval';
 import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure';
 import * as nip04 from 'nostr-tools/nip04';
