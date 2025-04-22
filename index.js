@@ -491,25 +491,14 @@ function createStore({
     },
 
     /**
-     * Get the public keys used by this store as NIP-19 encoded strings
-     * @returns {Object} Object containing authPubkey and kvPubkey as NIP-19 npub strings
+     * Close all relay connections
      */
-    getPublicKeys() {
-      return {
-        authPubkey: nip19.npubEncode(authPubkey),
-        kvPubkey: nip19.npubEncode(kvPubkey)
-      };
-    },
-
-    /**
-     * Get the secret keys used by this store as NIP-19 encoded strings (careful with this!)
-     * @returns {Object} Object containing authSecretKey and kvSecretKey as NIP-19 nsec strings
-     */
-    getSecretKeys() {
-      return {
-        authSecretKey: nip19.nsecEncode(authSecretKey),
-        kvSecretKey: nip19.nsecEncode(kvSecretKey)
-      };
+    async close() {
+      // Close all relay connections
+      for (const relay of connectedRelays) {
+        relay.close();
+      }
+      connectedRelays.length = 0;
     },
 
     /**
@@ -526,17 +515,19 @@ function createStore({
     },
 
     /**
-     * Close all relay connections
+     * Get the cryptographic keys.
      */
-    async close() {
-      // Flush any pending updates
-      await this.flush();
-
-      // Close all relay connections
-      for (const relay of connectedRelays) {
-        relay.close();
-      }
-      connectedRelays.length = 0;
+    keys() {
+      return {
+        "auth": {
+          "npub": nip19.npubEncode(authPubkey),
+          "nsec": nip19.nsecEncode(authSecretKey)
+        },
+        "kv": {
+          "npub": nip19.npubEncode(kvPubkey),
+          "nsec": nip19.nsecEncode(kvSecretKey)
+        },
+      };
     }
   };
 }
