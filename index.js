@@ -5,8 +5,13 @@ import { Relay } from 'nostr-tools/relay';
 import * as nip19 from 'nostr-tools/nip19';
 import createDebug from 'debug';
 
-// TODO: use a relayPool instead of tracking relays manually in here
+// TODO: use a SimplePool instead of tracking relays manually
 // TODO: del should set a special key rather than actually deleting
+// TODO: onChange() should return a promise that resolves next time a change happens
+// TODO: put alll the debounce and sync timers, resolvers, into one structure
+// TODO: crunch it down with msgpack
+// TODO: fail to set() if the msgpack raw size gets above configurable value
+// TODO: make the publishing thread clearer and more sequential - single fn with delays and flag checks
 
 // Default relays that are known to be reliable
 const DEFAULT_RELAYS = [
@@ -136,6 +141,30 @@ function createStore({
   }
 
   /**
+   * Schedule a sync with debounce
+   */
+  async function scheduleSync(after) {
+    // Create a new sync promise if one doesn't exist
+    if (!syncPromise) {
+      syncPromise = new Promise(resolve => {
+        syncResolve = resolve;
+      });
+    }
+
+    // wait for the local update
+    await after;
+
+    if (debounceTimer) {
+      clearTimeout(debounceTimer);
+    }
+
+    debounceTimer = setTimeout(async () => {
+      debounceTimer = null;
+      await publishToNostr();
+    }, debounce);
+  }
+
+  /**
    * Publish all data to Nostr relays
    */
   async function publishToNostr() {
@@ -232,30 +261,6 @@ function createStore({
         syncResolve = null;
       }
     }
-  }
-
-  /**
-   * Schedule a sync with debounce
-   */
-  async function scheduleSync(after) {
-    // Create a new sync promise if one doesn't exist
-    if (!syncPromise) {
-      syncPromise = new Promise(resolve => {
-        syncResolve = resolve;
-      });
-    }
-    
-    // wait for the local update
-    await after;
-
-    if (debounceTimer) {
-      clearTimeout(debounceTimer);
-    }
-
-    debounceTimer = setTimeout(async () => {
-      debounceTimer = null;
-      await publishToNostr();
-    }, debounce);
   }
 
   /**
