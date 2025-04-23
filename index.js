@@ -6,6 +6,7 @@ import * as nip19 from 'nostr-tools/nip19';
 import createDebug from 'debug';
 
 // TODO: del should set a special key rather than actually deleting
+// TODO: make debugging work the traditional way with an env var or localStorage setting
 // TODO: put all the debounce and sync timers, resolvers, into one structure
 // TODO: crunch it down with msgpack
 // TODO: fail to set() if the msgpack raw size gets above configurable value
@@ -85,6 +86,7 @@ function createStore({
   let debounceTimer = null;
   let syncPromise = null;
   let syncResolve = null;
+  let receiveResolve = null;
 
   // Change listeners
   const changeListeners = [];
@@ -259,7 +261,7 @@ function createStore({
 
           // Track which keys have changed for notifications
           const changedKeys = [];
-
+          
           // Update local storage with remote changes
           for (const [key, entry] of Object.entries(decrypted)) {
             // Skip internal meta keys
@@ -268,8 +270,15 @@ function createStore({
             const value = entry.value;
             const timestamp = entry.lastModified;
 
+            log('Getting current for key:', key);
             // Get current value to check timestamp
             const current = await localGet(key);
+
+            log('Got current for key ', key, "=", current);
+            log('Entry received for key ', key, "=", entry);
+            log('Has meta?', current && current.meta);
+            log('lastModified', current && current.meta && current.meta.lastModified, timestamp);
+            log('Is later?', current && current.meta && current.meta.lastModified < timestamp);
 
             // If we have no local value or remote is newer, update
             if (!current || !current.meta ||
@@ -279,6 +288,7 @@ function createStore({
                 // Handle deletion
                 await localDel(key);
               } else {
+                log("LOCAL UPDATE");
                 // Handle update
                 await localSet(key, {
                   value,
@@ -293,6 +303,8 @@ function createStore({
             }
           }
 
+          log("changedKeys", changedKeys);
+
           // Notify listeners of all changes at once
           if (changedKeys.length > 0) {
             for (const key of changedKeys) {
@@ -301,16 +313,17 @@ function createStore({
 
               // Notify listeners
               changeListeners.forEach(listener => {
-                try {
-                  listener(key, value);
-                } catch (error) {
-                  logError('Error in change listener: %O', error);
-                }
+                log("telling listener", key, value);
+                listener(key, value);
               });
             }
           }
         } catch (error) {
           logError('Error processing remote event: %O', error);
+        }
+        if (receiveResolve) {
+          receiveResolve();
+          receiveResolve = null;
         }
       }
     });
@@ -353,15 +366,16 @@ function createStore({
      * @returns {Promise<void>}
      */
     async set(key, value) {
-      const timestamp = Date.now();
-
-      // Store the value with metadata (timestamp is an implementation detail)
-      const setp = localSet(key, {
+      const entry = {
         value,
         meta: {
-          lastModified: timestamp
+          lastModified: Date.now()
         }
-      });
+      };
+
+      log("set", key, "to", entry);
+      // Store the value with metadata
+      const setp = localSet(key, entry);
 
       // Schedule a sync
       scheduleSync(setp);

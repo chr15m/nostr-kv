@@ -7,6 +7,11 @@ import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure
 import { matchFilters } from 'nostr-tools/filter';
 import WebSocket from 'ws';
 import { Server } from 'mock-socket';
+import debug from 'debug';
+
+// Setup debug loggers
+const logRelay = debug('nostr-kv:relay');
+const logTest = debug('nostr-kv:test');
 
 export class MockRelay {
   constructor(url) {
@@ -25,35 +30,35 @@ export class MockRelay {
       ),
     );
 
-    console.log(`[MockRelay] Created relay at ${this.url}`);
+    logRelay(`Created relay at ${this.url}`);
     this._server = new Server(this.url);
     this._connections = new Map(); // Map connection to connection ID
     this._subscriptions = new Map(); // Map subscription ID to subscription details
     this._connectionCounter = 0;
     this._server.on('connection', (conn) => {
       const connId = ++this._connectionCounter;
-      console.log(`[MockRelay] New connection #${connId} established`);
+      logRelay(`New connection #${connId} established`);
       this._connections.set(conn, connId);
 
       // Track subscriptions for this connection
       let connSubs = {};
 
       conn.on('message', (message) => {
-        console.log(`[MockRelay] Connection #${connId} received message: ${message.slice(0, 100)}...`);
+        logRelay(`Connection #${connId} received message: ${message.slice(0, 100)}...`);
         const data = JSON.parse(message);
 
         switch (data[0]) {
           case 'REQ': {
             let subId = data[1];
             let filters = data.slice(2);
-            console.log(`[MockRelay] Connection #${connId} created subscription ${subId} with filters: ${JSON.stringify(filters)}`);
+            logRelay(`Connection #${connId} created subscription ${subId} with filters: ${JSON.stringify(filters)}`);
 
             // Store subscription details
             connSubs[subId] = { conn, filters };
             this._subscriptions.set(`${connId}:${subId}`, { connId, subId, filters });
 
             // Log all active subscriptions
-            console.log(`[MockRelay] Active subscriptions: ${Array.from(this._subscriptions.keys()).join(', ')}`);
+            logRelay(`Active subscriptions: ${Array.from(this._subscriptions.keys()).join(', ')}`);
 
             // Send preloaded events that match the filters
             let matchCount = 0;
@@ -63,7 +68,7 @@ export class MockRelay {
                 conn.send(JSON.stringify(['EVENT', subId, event]));
               }
             });
-            console.log(`[MockRelay] Sent ${matchCount} preloaded events for subscription ${connId}:${subId}`);
+            logRelay(`Sent ${matchCount} preloaded events for subscription ${connId}:${subId}`);
 
             // Generate additional events based on filters
             filters.forEach((filter) => {
@@ -89,12 +94,12 @@ export class MockRelay {
             });
 
             conn.send(JSON.stringify(['EOSE', subId]));
-            console.log(`[MockRelay] Sent EOSE for subscription ${subId}`);
+            logRelay(`Sent EOSE for subscription ${subId}`);
             break;
           }
           case 'CLOSE': {
             let subId = data[1];
-            console.log(`[MockRelay] Connection #${connId} closing subscription ${subId}`);
+            logRelay(`Connection #${connId} closing subscription ${subId}`);
             delete connSubs[subId];
             this._subscriptions.delete(`${connId}:${subId}`);
             break;
@@ -103,9 +108,9 @@ export class MockRelay {
             let event = data[1];
             conn.send(JSON.stringify(['OK', event.id, true, '']));
 
-            console.log(`[MockRelay] Connection #${connId} published event: kind=${event.kind} from pubkey=${event.pubkey.slice(0, 8)}`);
-            console.log(`[MockRelay] Event content length: ${event.content.length} bytes`);
-            console.log(`[MockRelay] Event tags: ${JSON.stringify(event.tags)}`);
+            logRelay(`Connection #${connId} published event: kind=${event.kind} from pubkey=${event.pubkey.slice(0, 8)}`);
+            logRelay(`Event content length: ${event.content.length} bytes`);
+            logRelay(`Event tags: ${JSON.stringify(event.tags)}`);
 
             // Store the event for future subscribers
             this.preloadedEvents.push(event);
@@ -114,45 +119,61 @@ export class MockRelay {
             let broadcastCount = 0;
 
             // Log all subscriptions for debugging
-            console.log(`[MockRelay] Broadcasting to ${this._subscriptions.size} subscriptions`);
+            logRelay(`Broadcasting to ${this._subscriptions.size} subscriptions`);
 
+            // Collect matching subscriptions for delayed broadcast
+            const matchingSubscriptions = [];
+            
             // Broadcast to all subscriptions
             for (const [subKey, sub] of this._subscriptions.entries()) {
               const { connId: targetConnId, subId, filters } = sub;
 
-              console.log(`[MockRelay] Checking if event matches filters for subscription ${subKey}`);
+              logRelay(`Checking if event matches filters for subscription ${subKey}`);
 
               if (matchFilters(filters, event)) {
                 const targetConn = Array.from(this._connections.entries())
                   .find(([_, id]) => id === targetConnId)?.[0];
 
                 if (targetConn) {
-                  console.log(`[MockRelay] Broadcasting event to connection #${targetConnId} subscription ${subId}`);
-                  console.log(`[MockRelay] Event: ${JSON.stringify(['EVENT', subId, event]).slice(0, 100)}...`);
-                  targetConn.send(JSON.stringify(['EVENT', subId, event]));
-                  broadcastCount++;
+                  logRelay(`Event matches subscription ${subKey}, will broadcast with delay`);
+                  matchingSubscriptions.push({
+                    conn: targetConn,
+                    subId: subId,
+                    event: event
+                  });
                 } else {
-                  console.log(`[MockRelay] Connection #${targetConnId} not found for subscription ${subId}`);
+                  logRelay(`Connection #${targetConnId} not found for subscription ${subId}`);
                 }
               } else {
-                console.log(`[MockRelay] Event doesn't match filters for subscription ${subKey}`);
-                console.log(`[MockRelay] Filters: ${JSON.stringify(filters)}`);
+                logRelay(`Event doesn't match filters for subscription ${subKey}`);
+                logRelay(`Filters: ${JSON.stringify(filters)}`);
               }
             }
+            
+            // Broadcast with random delays to simulate network latency
+            matchingSubscriptions.forEach(sub => {
+              // Random delay between 50-300ms to simulate network latency
+              const delay = 50 + Math.floor(Math.random() * 250);
+              setTimeout(() => {
+                logRelay(`Broadcasting event to subscription ${sub.subId} after ${delay}ms delay`);
+                sub.conn.send(JSON.stringify(['EVENT', sub.subId, sub.event]));
+                broadcastCount++;
+              }, delay);
+            });
 
-            console.log(`[MockRelay] Event broadcast to ${broadcastCount} subscriptions`);
+            logRelay(`Event scheduled for broadcast to ${matchingSubscriptions.length} subscriptions with random delays`);
             break;
           }
         }
       });
 
       conn.on('close', () => {
-        console.log(`[MockRelay] Connection #${connId} closed`);
+        logRelay(`Connection #${connId} closed`);
 
         // Remove all subscriptions for this connection
         for (const [subKey, sub] of this._subscriptions.entries()) {
           if (sub.connId === connId) {
-            console.log(`[MockRelay] Removing subscription ${subKey} due to connection close`);
+            logRelay(`Removing subscription ${subKey} due to connection close`);
             this._subscriptions.delete(subKey);
           }
         }
@@ -172,28 +193,28 @@ export class MockRelay {
 
   // Method to check if an event matches any subscription
   checkEventAgainstSubscriptions(event) {
-    console.log(`[MockRelay] Checking event ${event.id.slice(0, 8)} against all subscriptions`);
+    logRelay(`Checking event ${event.id.slice(0, 8)} against all subscriptions`);
     let matchCount = 0;
 
     for (const [subKey, sub] of this._subscriptions.entries()) {
       if (matchFilters(sub.filters, event)) {
-        console.log(`[MockRelay] Event matches subscription ${subKey}`);
+        logRelay(`Event matches subscription ${subKey}`);
         matchCount++;
       }
     }
 
-    console.log(`[MockRelay] Event matches ${matchCount} subscriptions`);
+    logRelay(`Event matches ${matchCount} subscriptions`);
     return matchCount > 0;
   }
 
   // Debug method to print all active subscriptions
   printSubscriptions() {
-    console.log(`[MockRelay] === Active Subscriptions ===`);
+    logRelay(`=== Active Subscriptions ===`);
     for (const [subKey, sub] of this._subscriptions.entries()) {
-      console.log(`[MockRelay] Subscription ${subKey}:`);
-      console.log(`[MockRelay]   Filters: ${JSON.stringify(sub.filters)}`);
+      logRelay(`Subscription ${subKey}:`);
+      logRelay(`  Filters: ${JSON.stringify(sub.filters)}`);
     }
-    console.log(`[MockRelay] === End Subscriptions ===`);
+    logRelay(`=== End Subscriptions ===`);
   }
 }
 
@@ -211,10 +232,10 @@ export function setupTestEnvironment() {
   // Setup the appropriate WebSocket implementation
   if (useRealRelays) {
     useWebSocketImplementation(WebSocket);
-    log(`Using real relays: ${realRelays.join(', ')}`);
+    logTest(`Using real relays: ${realRelays.join(', ')}`);
   } else {
     // For mock relays, we don't need to set a custom WebSocket implementation
-    log('Using mock relays');
+    logTest('Using mock relays');
   }
 
   // Create mock relays if needed
@@ -232,5 +253,5 @@ export function setupTestEnvironment() {
  * Helper to log with timestamp
  */
 export function log() {
-  console.log.apply(null, [new Date()].concat(Array.from(arguments)));
+  logTest.apply(null, Array.from(arguments));
 }
