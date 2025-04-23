@@ -5,8 +5,8 @@ import { SimplePool } from 'nostr-tools/pool';
 import * as nip19 from 'nostr-tools/nip19';
 import createDebug from 'debug';
 
+// TODO: fix up the remaining tests to use the new promises
 // TODO: del should set a special key rather than actually deleting
-// TODO: make debugging work the traditional way with an env var or localStorage setting
 // TODO: put all the debounce and sync timers, resolvers, into one structure
 // TODO: crunch it down with msgpack
 // TODO: fail to set() if the msgpack raw size gets above configurable value
@@ -261,7 +261,7 @@ function createStore({
 
           // Track which keys have changed for notifications
           const changedKeys = [];
-          
+
           // Update local storage with remote changes
           for (const [key, entry] of Object.entries(decrypted)) {
             // Skip internal meta keys
