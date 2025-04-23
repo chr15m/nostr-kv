@@ -2,7 +2,7 @@
 import 'fake-indexeddb/auto';
 
 // Import WebSocket implementation for Node.js environment
-import { useWebSocketImplementation } from 'nostr-tools/relay';
+import { useWebSocketImplementation } from 'nostr-tools/pool';
 import WebSocket from 'ws';
 useWebSocketImplementation(WebSocket);
 
@@ -126,6 +126,7 @@ async function runTest() {
   }
 
   // Clean up
+  console.log("\n--- Cleaning up ---");
   await store.close();
   console.log("\nTest completed, connection closed.");
 }

@@ -1,11 +1,10 @@
 import { get as idbGet, set as idbSet, del as idbDel, entries as idbEntries, createStore as createIdbStore } from 'idb-keyval';
 import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure';
 import * as nip04 from 'nostr-tools/nip04';
-import { Relay } from 'nostr-tools/relay';
+import { SimplePool } from 'nostr-tools/pool';
 import * as nip19 from 'nostr-tools/nip19';
 import createDebug from 'debug';
 
-// TODO: use a SimplePool instead of tracking relays manually
 // TODO: del should set a special key rather than actually deleting
 // TODO: onChange() should return a promise that resolves next time a change happens
 // TODO: put alll the debounce and sync timers, resolvers, into one structure
@@ -82,9 +81,8 @@ function createStore({
   const localSet = (key, value) => idbSet(key, value, customStore);
   const localDel = (key) => idbDel(key, customStore);
 
-  // Track connected relays
-  const connectedRelays = [];
-  let relayConnectPromise = null;
+  // Create a SimplePool for relay management
+  const pool = new SimplePool();
 
   // Debounce mechanism for sync
   let debounceTimer = null;
@@ -97,28 +95,6 @@ function createStore({
   // Special meta keys (stored in a special meta key that won't be synced)
   const LAST_SYNC_KEY = '_nkvmeta_lastSync';
   let lastSyncTime = 0;
-
-  /**
-   * Connect to relays if not already connected
-   */
-  async function ensureRelayConnections() {
-    if (relayConnectPromise) return relayConnectPromise;
-
-    relayConnectPromise = Promise.all(
-      relays.map(async (url) => {
-        try {
-          const relay = await Relay.connect(url);
-          connectedRelays.push(relay);
-          return relay;
-        } catch (error) {
-          logError('Failed to connect to relay %s: %O', url, error);
-          return null;
-        }
-      })
-    ).then(results => results.filter(Boolean));
-
-    return relayConnectPromise;
-  }
 
   /**
    * Encrypt data for storage on Nostr
@@ -165,11 +141,9 @@ function createStore({
   }
 
   /**
-   * Publish all data to Nostr relays
+   * Publish all data to Nostr relays using SimplePool
    */
   async function publishToNostr() {
-    await ensureRelayConnections();
-
     // Get all entries from the store (except meta entries)
     const allEntries = await idbEntries(customStore);
 
@@ -210,46 +184,17 @@ function createStore({
 
     const signedEvent = finalizeEvent(eventTemplate, authSecretKey);
 
-    // Publish to all connected relays
-    const publishPromises = connectedRelays.map(relay =>
-      relay.publish(signedEvent).catch(err => {
-        if (err.message) {
-          if (err.message.includes("replaced: have newer event")) {
-            logError('Relay %s says it already has a newer version of this event from the same client (authPubkey: %s)', 
-              relay.url, authPubkey);
-            logError('This should never happen! Event created_at: %d, tags: %O', 
-              eventTemplate.created_at, eventTemplate.tags);
-          } else if (err.message.includes("rate-limited")) {
-            log('Relay %s rate-limited this publish request', relay.url);
-          } else {
-            logError('Failed to publish to %s: %O', relay.url, err);
-          }
-        } else {
-          logError('Failed to publish to %s with unknown error: %O', relay.url, err);
-        }
-        throw err;
-      })
-    );
-
     try {
-      // Track results for better error handling
-      const results = await Promise.allSettled(publishPromises);
-
-      // Check if we had at least one success
-      const anySuccess = results.some(r => r.status === 'fulfilled');
-
-      if (anySuccess) {
-        // If we had at least one success, consider it a success
-        log('Published successfully to at least one relay');
-
-      } else {
-        // Real failure - all relays rejected for reasons other than "replaced"
-        logError('All publish attempts failed: %O', results);
-
-
-        // Throw a consolidated error
+      // Use SimplePool to publish to all relays
+      const publishPromise = pool.publish(relays, signedEvent);
+      
+      // Wait for at least one relay to accept the event
+      await Promise.any(publishPromise).catch(err => {
+        logError('All publish attempts failed: %O', err);
         throw new Error('Failed to publish to any relay');
-      }
+      });
+      
+      log('Published successfully to at least one relay');
     } catch (error) {
       logError('Error in publish process: %O', error);
       throw error;
@@ -264,117 +209,113 @@ function createStore({
   }
 
   /**
-   * Subscribe to updates from other clients
+   * Subscribe to updates from other clients using SimplePool
    */
   async function subscribeToUpdates() {
-    await ensureRelayConnections();
+    // Create filter with 'since' parameter if we have a last sync time
+    const filter = {
+      kinds: [30078],
+      "#p": [kvPubkey],
+      "#d": [namespace]
+    };
 
-    connectedRelays.forEach(relay => {
-      // Create filter with 'since' parameter if we have a last sync time
-      const filter = {
-        kinds: [30078],
-        "#p": [kvPubkey],
-        "#d": [namespace]
-      };
+    // Only add 'since' if we have a valid last sync time
+    if (lastSyncTime > 0) {
+      filter.since = lastSyncTime;
+    }
 
-      // Only add 'since' if we have a valid last sync time
-      if (lastSyncTime > 0) {
-        filter.since = lastSyncTime;
-      }
+    // Subscribe to all relays at once using SimplePool
+    pool.subscribeMany(relays, [filter], {
+      onevent: async (event) => {
+        // Skip our own events
+        if (event.pubkey === authPubkey) return;
 
-      const sub = relay.subscribe([filter], {
-        onevent: async (event) => {
-          // Skip our own events
-          if (event.pubkey === authPubkey) return;
+        try {
+          // Double-check the namespace (for extra safety)
+          const dTag = event.tags.find(tag => tag[0] === 'd');
+          if (!dTag || dTag[1] !== namespace) return;
 
-          try {
-            // Double-check the namespace (for extra safety)
-            const dTag = event.tags.find(tag => tag[0] === 'd');
-            if (!dTag || dTag[1] !== namespace) return;
+          log('Received event from pubkey: %s', event.pubkey);
+          log('Event created_at: %s', new Date(event.created_at * 1000).toISOString());
+          log('Event tags: %O', event.tags);
 
-            log('Received event from pubkey: %s', event.pubkey);
-            log('Event created_at: %s', new Date(event.created_at * 1000).toISOString());
-            log('Event tags: %O', event.tags);
-
-            // Update last sync time to this event's created_at
-            if (event.created_at > lastSyncTime) {
-              lastSyncTime = event.created_at;
-              // Store the last sync time in IndexedDB but don't sync it
-              await localSet(LAST_SYNC_KEY, {
-                value: lastSyncTime,
-                meta: {
-                  lastModified: Date.now()
-                }
-              });
-            }
-
-            const decrypted = await decryptData(event.content);
-            if (!decrypted) {
-              logError('Failed to decrypt event or invalid format: %O', decrypted);
-              return;
-            }
-
-            log('Received %d entries', Object.keys(decrypted).length);
-            log('Decrypted data structure: %O', decrypted);
-
-            // Track which keys have changed for notifications
-            const changedKeys = [];
-
-            // Update local storage with remote changes
-            for (const [key, entry] of Object.entries(decrypted)) {
-              // Skip internal meta keys
-              if (key.startsWith('_nkvmeta')) continue;
-
-              const value = entry.value;
-              const timestamp = entry.lastModified;
-
-              // Get current value to check timestamp
-              const current = await localGet(key);
-
-              // If we have no local value or remote is newer, update
-              if (!current || !current.meta ||
-                  current.meta.lastModified < timestamp) {
-
-                if (value === null) {
-                  // Handle deletion
-                  await localDel(key);
-                } else {
-                  // Handle update
-                  await localSet(key, {
-                    value,
-                    meta: {
-                      lastModified: timestamp
-                    }
-                  });
-                }
-
-                // Add to changed keys list
-                changedKeys.push(key);
+          // Update last sync time to this event's created_at
+          if (event.created_at > lastSyncTime) {
+            lastSyncTime = event.created_at;
+            // Store the last sync time in IndexedDB but don't sync it
+            await localSet(LAST_SYNC_KEY, {
+              value: lastSyncTime,
+              meta: {
+                lastModified: Date.now()
               }
-            }
+            });
+          }
 
-            // Notify listeners of all changes at once
-            if (changedKeys.length > 0) {
-              for (const key of changedKeys) {
-                const entry = await localGet(key);
-                const value = entry ? entry.value : null;
+          const decrypted = await decryptData(event.content);
+          if (!decrypted) {
+            logError('Failed to decrypt event or invalid format: %O', decrypted);
+            return;
+          }
 
-                // Notify listeners
-                changeListeners.forEach(listener => {
-                  try {
-                    listener(key, value);
-                  } catch (error) {
-                    logError('Error in change listener: %O', error);
+          log('Received %d entries', Object.keys(decrypted).length);
+          log('Decrypted data structure: %O', decrypted);
+
+          // Track which keys have changed for notifications
+          const changedKeys = [];
+
+          // Update local storage with remote changes
+          for (const [key, entry] of Object.entries(decrypted)) {
+            // Skip internal meta keys
+            if (key.startsWith('_nkvmeta')) continue;
+
+            const value = entry.value;
+            const timestamp = entry.lastModified;
+
+            // Get current value to check timestamp
+            const current = await localGet(key);
+
+            // If we have no local value or remote is newer, update
+            if (!current || !current.meta ||
+                current.meta.lastModified < timestamp) {
+
+              if (value === null) {
+                // Handle deletion
+                await localDel(key);
+              } else {
+                // Handle update
+                await localSet(key, {
+                  value,
+                  meta: {
+                    lastModified: timestamp
                   }
                 });
               }
 
+              // Add to changed keys list
+              changedKeys.push(key);
             }
-          } catch (error) {
-            logError('Error processing remote event: %O', error);
           }
+
+          // Notify listeners of all changes at once
+          if (changedKeys.length > 0) {
+            for (const key of changedKeys) {
+              const entry = await localGet(key);
+              const value = entry ? entry.value : null;
+
+              // Notify listeners
+              changeListeners.forEach(listener => {
+                try {
+                  listener(key, value);
+                } catch (error) {
+                  logError('Error in change listener: %O', error);
+                }
+              });
+            }
+          }
+        } catch (error) {
+          logError('Error processing remote event: %O', error);
         }
-      });
+      }
     });
   }
 
@@ -462,11 +403,8 @@ function createStore({
      * Close all relay connections
      */
     async close() {
-      // Close all relay connections
-      for (const relay of connectedRelays) {
-        relay.close();
-      }
-      connectedRelays.length = 0;
+      // Close all relay connections using SimplePool
+      return pool.close(relays);
     },
 
     /**
