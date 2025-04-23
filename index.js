@@ -32,7 +32,6 @@ const DEFAULT_DEBOUNCE = 1010;
  * @param {string[]} [options.relays] Array of relay URLs (defaults to predefined list)
  * @param {number} [options.debounce] Debounce time in ms for rapid updates (default: 1010)
  * @param {string} [options.dbName] Custom IndexedDB database name (useful for testing)
- * @param {boolean} [options.debug] Enable debug logging (default: false)
  * @returns {Object} Store interface with get, set, del methods
  */
 function createStore({
@@ -42,7 +41,6 @@ function createStore({
   relays = DEFAULT_RELAYS,
   debounce = DEFAULT_DEBOUNCE,
   dbName = null,
-  debug = false
 }) {
   if (!namespace) {
     throw new Error('Namespace is required');
@@ -66,8 +64,8 @@ function createStore({
 
   // Create debug loggers with namespace
   const shortAuthKey = authPubkey.substring(0, 8);
-  const log = createDebug(`nostr-kv:${namespace}:${shortAuthKey}`);
-  const logError = createDebug(`nostr-kv:${namespace}:${shortAuthKey}:error`);
+  const log = createDebug(`nostr-kv:store:${namespace}:${shortAuthKey}`);
+  const logError = createDebug(`nostr-kv:store:${namespace}:${shortAuthKey}:error`);
 
   log("DEBUG ENABLED");
   logError("DEBUG ENABLED");
