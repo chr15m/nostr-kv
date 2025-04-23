@@ -1,5 +1,5 @@
 // Import common test utilities
-import { setupTestEnvironment, log } from './common.mjs';
+import { setupTestEnvironment } from './common.mjs';
 
 // Import necessary tools
 import { generateSecretKey, getPublicKey } from 'nostr-tools/pure';
@@ -12,6 +12,9 @@ const SYNC_DELAY = 2000; // Time to wait for sync to happen
 
 // Setup test environment
 const { relayURLs } = setupTestEnvironment();
+
+// Use console.log for test output
+const log = console.log.bind(console);
 
 async function runTest() {
   log(`Starting offline test with namespace: ${TEST_NAMESPACE}`);
@@ -36,18 +39,13 @@ async function runTest() {
   log(`Client 2 authPubkey: ${authPubkey2}`);
   log(`Client 3 authPubkey: ${authPubkey3} (will be offline)`);
 
-  // Check if DEBUG environment variable is set
-  const debugEnabled = process.env.DEBUG !== undefined;
-
   // Create three stores with the same kvNsec but different authNsec and isolated databases
   const store1 = createStore({
     namespace: TEST_NAMESPACE,
     authNsec: nip19.nsecEncode(authSecretKey1),
     kvNsec: kvNsec,
     relays: relayURLs,
-    debounce: 100, // Use a small debounce for testing
     dbName: `client1-${TEST_NAMESPACE}`, // Unique database name for client 1
-    debug: debugEnabled // Enable debug logging based on environment variable
   });
 
   const store2 = createStore({
@@ -55,9 +53,7 @@ async function runTest() {
     authNsec: nip19.nsecEncode(authSecretKey2),
     kvNsec: kvNsec,
     relays: relayURLs,
-    debounce: 100, // Use a small debounce for testing
     dbName: `client2-${TEST_NAMESPACE}`, // Unique database name for client 2
-    debug: debugEnabled // Enable debug logging based on environment variable
   });
 
   // We'll create store3 later to simulate it being offline initially
@@ -94,7 +90,13 @@ async function runTest() {
     await store1.set(key3, value3);
 
     // Wait for sync between Client 1 and Client 2
-    log(`Waiting ${SYNC_DELAY}ms for sync between online clients...`);
+    log(`Waiting for sync between online clients...`);
+    await Promise.all([
+      store1.sync(),
+      store2.sync()
+    ]);
+
+    // Additional wait to ensure propagation
     await new Promise(resolve => setTimeout(resolve, SYNC_DELAY));
 
     // Verify Client 1 and Client 2 are in sync
@@ -125,9 +127,7 @@ async function runTest() {
       authNsec: nip19.nsecEncode(authSecretKey3),
       kvNsec: kvNsec,
       relays: relayURLs,
-      debounce: 100,
       dbName: `client3-${TEST_NAMESPACE}`, // Unique database name for client 3
-      debug: debugEnabled // Enable debug logging based on environment variable
     });
 
     // Set up change listener for store3
@@ -138,15 +138,17 @@ async function runTest() {
     });
 
     // Wait for Client 3 to sync and catch up
-    log(`Waiting for offline client to catch up (max ${SYNC_DELAY * 2}ms)...`);
-    await new Promise((resolve) => {
-      const timeout = setTimeout(resolve, SYNC_DELAY * 2);
-      const unsubscribe = store3.onSync(() => {
-        clearTimeout(timeout);
-        unsubscribe();
-        resolve();
-      });
-    });
+    log(`Waiting for offline client to catch up...`);
+
+    // Wait for at least one receive event or timeout after a while
+    const timeoutPromise = new Promise(resolve => setTimeout(resolve, SYNC_DELAY * 2));
+    await Promise.race([
+      store3.onReceive(),
+      timeoutPromise
+    ]);
+
+    // Additional wait to ensure all changes are processed
+    await new Promise(resolve => setTimeout(resolve, 1000));
 
     // Verify Client 3 caught up with all changes
     const client3Key1 = await store3.get(key1);
@@ -185,7 +187,4 @@ async function runTest() {
 }
 
 // Run the test
-runTest().catch(err => {
-  log("Fatal error:", err);
-  process.exit(1);
-});
+runTest();
