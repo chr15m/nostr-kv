@@ -68,10 +68,8 @@ function createStore({
   const log = createDebug(`nostr-kv:${namespace}:${shortAuthKey}`);
   const logError = createDebug(`nostr-kv:${namespace}:${shortAuthKey}:error`);
 
-  // Enable debug logging if requested
-  if (debug) {
-    createDebug.enable(`nostr-kv:${namespace}:${shortAuthKey}*`);
-  }
+  log("DEBUG ENABLED");
+  logError("DEBUG ENABLED");
 
   // Create a custom store for this namespace
   const dbNameToUse = dbName || `nostr-kv-${namespace}`;
@@ -413,6 +411,16 @@ function createStore({
 
         // Add the one-time callback to listeners
         changeListeners.push(oneTimeCallback);
+      });
+    },
+
+    /**
+     * Get a promise that resolves when we receive anything from a relay.
+     * @returns {Promise} A promise that resolves when any
+     */
+    async onReceive() {
+      return new Promise(resolve => {
+        receiveResolve = resolve;
       });
     },
 
