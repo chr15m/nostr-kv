@@ -30,5 +30,8 @@
   "license": "MIT",
   "jshintConfig": {
     "esversion": 8
+  },
+  "devDependencies": {
+    "mock-socket": "^9.3.1"
   }
 }

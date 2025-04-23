@@ -7,7 +7,7 @@ import createDebug from 'debug';
 
 // TODO: del should set a special key rather than actually deleting
 // TODO: onChange() should return a promise that resolves next time a change happens
-// TODO: put alll the debounce and sync timers, resolvers, into one structure
+// TODO: put all the debounce and sync timers, resolvers, into one structure
 // TODO: crunch it down with msgpack
 // TODO: fail to set() if the msgpack raw size gets above configurable value
 // TODO: make the publishing thread clearer and more sequential - single fn with delays and flag checks
@@ -68,7 +68,7 @@ function createStore({
   const shortAuthKey = authPubkey.substring(0, 8);
   const log = createDebug(`nostr-kv:${namespace}:${shortAuthKey}`);
   const logError = createDebug(`nostr-kv:${namespace}:${shortAuthKey}:error`);
-  
+
   // Enable debug logging if requested
   if (debug) {
     createDebug.enable(`nostr-kv:${namespace}:${shortAuthKey}*`);
@@ -187,13 +187,13 @@ function createStore({
     try {
       // Use SimplePool to publish to all relays
       const publishPromise = pool.publish(relays, signedEvent);
-      
+
       // Wait for at least one relay to accept the event
       await Promise.any(publishPromise).catch(err => {
         logError('All publish attempts failed: %O', err);
         throw new Error('Failed to publish to any relay');
       });
-      
+
       log('Published successfully to at least one relay');
     } catch (error) {
       logError('Error in publish process: %O', error);

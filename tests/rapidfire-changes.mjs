@@ -1,10 +1,5 @@
-// Import fake-indexeddb polyfill first
-import 'fake-indexeddb/auto';
-
-// Import WebSocket implementation for Node.js environment
-import { useWebSocketImplementation } from 'nostr-tools/pool';
-import WebSocket from 'ws';
-useWebSocketImplementation(WebSocket);
+// Import common test utilities
+import { setupTestEnvironment, log } from './common.mjs';
 
 // Import necessary tools
 import { generateSecretKey, getPublicKey } from 'nostr-tools/pure';
@@ -13,18 +8,20 @@ import { createStore } from '../index.js';
 
 // Test configuration
 const TEST_NAMESPACE = 'rapidfire-test-' + Math.floor(Math.random() * 1000000);
-const TEST_RELAY = 'wss://relay.damus.io';
 const SYNC_DELAY = 3000; // Time to wait for sync to happen
 
+// Setup test environment
+const { relayURLs } = setupTestEnvironment();
+
 async function runTest() {
-  console.log(`Starting rapidfire test with namespace: ${TEST_NAMESPACE}`);
+  log(`Starting rapidfire test with namespace: ${TEST_NAMESPACE}`);
 
   // Generate a shared encryption key (kvNsec)
   const kvSecretKey = generateSecretKey();
   const kvNsec = nip19.nsecEncode(kvSecretKey);
   const kvPubkey = getPublicKey(kvSecretKey);
 
-  console.log(`Using shared kvPubkey: ${kvPubkey}`);
+  log(`Using shared kvPubkey: ${kvPubkey}`);
 
   // Create two different auth keys (one for each client)
   const authSecretKey1 = generateSecretKey();
@@ -33,8 +30,8 @@ async function runTest() {
   const authPubkey1 = getPublicKey(authSecretKey1);
   const authPubkey2 = getPublicKey(authSecretKey2);
 
-  console.log(`Client 1 authPubkey: ${authPubkey1} (will make rapid changes)`);
-  console.log(`Client 2 authPubkey: ${authPubkey2} (will receive changes)`);
+  log(`Client 1 authPubkey: ${authPubkey1} (will make rapid changes)`);
+  log(`Client 2 authPubkey: ${authPubkey2} (will receive changes)`);
 
   // Check if DEBUG environment variable is set
   const debugEnabled = process.env.DEBUG !== undefined;
@@ -44,7 +41,7 @@ async function runTest() {
     namespace: TEST_NAMESPACE,
     authNsec: nip19.nsecEncode(authSecretKey1),
     kvNsec: kvNsec,
-    relays: [TEST_RELAY],
+    relays: relayURLs,
     debounce: 500, // Use a longer debounce for testing
     dbName: `client1-${TEST_NAMESPACE}`, // Unique database name for client 1
     debug: debugEnabled // Enable debug logging based on environment variable
@@ -54,7 +51,7 @@ async function runTest() {
     namespace: TEST_NAMESPACE,
     authNsec: nip19.nsecEncode(authSecretKey2),
     kvNsec: kvNsec,
-    relays: [TEST_RELAY],
+    relays: relayURLs,
     debounce: 100, // Use a small debounce for testing
     dbName: `client2-${TEST_NAMESPACE}`, // Unique database name for client 2
     debug: debugEnabled // Enable debug logging based on environment variable
@@ -63,19 +60,19 @@ async function runTest() {
   // Set up change listener for store2
   const changedKeys = new Set();
   const removeListener = store2.onChange((key, value) => {
-    console.log(`Client 2 received change for key "${key}": ${JSON.stringify(value)}`);
+    log(`Client 2 received change for key "${key}": ${JSON.stringify(value)}`);
     changedKeys.add(key);
   });
 
   try {
     // Test: Make rapid changes to multiple keys
-    console.log("\n--- Test: Rapidfire changes to test debounce and queuing ---");
+    log("\n--- Test: Rapidfire changes to test debounce and queuing ---");
 
     const baseKey = 'rapid-key-';
     const numKeys = 10;
     const expectedKeys = [];
 
-    console.log(`Making ${numKeys} rapid changes...`);
+    log(`Making ${numKeys} rapid changes...`);
 
     // Make rapid changes to multiple keys
     for (let i = 0; i < numKeys; i++) {
@@ -91,11 +88,11 @@ async function runTest() {
     }
 
     // Wait for debounce to trigger
-    console.log("Waiting for debounce to trigger...");
+    log("Waiting for debounce to trigger...");
     await new Promise(resolve => setTimeout(resolve, 1000));
 
     // Wait for sync to happen
-    console.log(`Waiting for sync (max ${SYNC_DELAY}ms)...`);
+    log(`Waiting for sync (max ${SYNC_DELAY}ms)...`);
     await new Promise((resolve) => {
       const timeout = setTimeout(resolve, SYNC_DELAY);
       const unsubscribe = store1.onSync(() => {
@@ -106,25 +103,25 @@ async function runTest() {
     });
 
     // Check if all keys were received by Client 2
-    console.log(`Client 2 received changes for ${changedKeys.size} keys`);
+    log(`Client 2 received changes for ${changedKeys.size} keys`);
 
     let allKeysReceived = true;
     for (const key of expectedKeys) {
       const value = await store2.get(key);
       if (!value) {
-        console.log(`❌ Missing value for key: ${key}`);
+        log(`❌ Missing value for key: ${key}`);
         allKeysReceived = false;
       }
     }
 
     if (allKeysReceived) {
-      console.log("✅ TEST PASSED: All rapidfire changes were successfully synced");
+      log("✅ TEST PASSED: All rapidfire changes were successfully synced");
     } else {
-      console.log("❌ TEST FAILED: Some rapidfire changes were not synced");
+      log("❌ TEST FAILED: Some rapidfire changes were not synced");
     }
 
     // Test: Update the same key multiple times in rapid succession
-    console.log("\n--- Test: Multiple updates to the same key ---");
+    log("\n--- Test: Multiple updates to the same key ---");
 
     const singleKey = 'single-key';
     const finalValue = { message: "Final value", timestamp: Date.now() };
@@ -141,23 +138,23 @@ async function runTest() {
     await store1.set(singleKey, finalValue);
 
     // Wait for sync to happen
-    console.log(`Waiting ${SYNC_DELAY}ms for sync...`);
+    log(`Waiting ${SYNC_DELAY}ms for sync...`);
     await new Promise(resolve => setTimeout(resolve, SYNC_DELAY));
 
     // Check if Client 2 has the final value
     const receivedValue = await store2.get(singleKey);
-    console.log(`Client 2 final value for "${singleKey}":`, receivedValue);
+    log(`Client 2 final value for "${singleKey}":`, receivedValue);
 
     if (receivedValue && receivedValue.message === finalValue.message) {
-      console.log("✅ TEST PASSED: Final value was correctly synced");
+      log("✅ TEST PASSED: Final value was correctly synced");
     } else {
-      console.log("❌ TEST FAILED: Final value was not correctly synced");
+      log("❌ TEST FAILED: Final value was not correctly synced");
     }
 
     // Clean up
     removeListener();
 
-    console.log("\n--- All tests completed ---");
+    log("\n--- All tests completed ---");
 
   } catch (error) {
     console.error("Test failed with error:", error);
@@ -166,13 +163,13 @@ async function runTest() {
     await store1.close();
     await store2.close();
 
-    console.log("Test completed, connections closed.");
+    log("Test completed, connections closed.");
     process.exit(0);
   }
 }
 
 // Run the test
 runTest().catch(err => {
-  console.error("Fatal error:", err);
+  log("Fatal error:", err);
   process.exit(1);
 });

@@ -1,10 +1,5 @@
-// Import fake-indexeddb polyfill first
-import 'fake-indexeddb/auto';
-
-// Import WebSocket implementation for Node.js environment
-import { useWebSocketImplementation } from 'nostr-tools/pool';
-import WebSocket from 'ws';
-useWebSocketImplementation(WebSocket);
+// Import common test utilities
+import { setupTestEnvironment } from './common.mjs';
 
 // Import necessary tools
 import { generateSecretKey, getPublicKey } from 'nostr-tools/pure';
@@ -13,6 +8,9 @@ import { createStore } from '../index.js';
 
 // Test configuration
 const TEST_NAMESPACE = 'properties-test-' + Math.floor(Math.random() * 1000000);
+
+// Setup test environment
+const { relayURLs } = setupTestEnvironment();
 
 async function runTest() {
   console.log(`Starting basic properties test with namespace: ${TEST_NAMESPACE}`);
@@ -24,22 +22,22 @@ async function runTest() {
 
   console.log(`Using shared kvPubkey: ${kvPubkey}`);
 
-  // Create a store with minimal configuration
+  // Create a store with the test relays
   const store = createStore({
     namespace: TEST_NAMESPACE,
     kvNsec: kvNsec,
-    // No relays specified - should use defaults
+    relays: relayURLs,
     dbName: `test-${TEST_NAMESPACE}`,
     debug: true
   });
 
   // Check that the store has the expected methods
   console.log("\n--- Testing store interface ---");
-  
+
   const expectedMethods = [
     'get', 'set', 'del', 'onChange', 'sync', 'close'
   ];
-  
+
   let allMethodsPresent = true;
   for (const method of expectedMethods) {
     if (typeof store[method] === 'function') {
@@ -49,7 +47,7 @@ async function runTest() {
       allMethodsPresent = false;
     }
   }
-  
+
   // Check for keys method
   if (typeof store.keys === 'function') {
     console.log(`✅ Store has keys method`);
@@ -57,7 +55,7 @@ async function runTest() {
     console.log(`❌ Missing keys method`);
     allMethodsPresent = false;
   }
-  
+
   if (allMethodsPresent) {
     console.log("✅ Store has all expected methods");
   } else {
@@ -66,13 +64,13 @@ async function runTest() {
 
   // Check keys method
   console.log("\n--- Testing keys method ---");
-  
+
   const keys = store.keys();
   if (keys && keys.auth && keys.kv) {
     console.log("✅ store.keys() contains both auth and kv keys");
     console.log(`auth.npub: ${keys.auth.npub}`);
     console.log(`kv.npub: ${keys.kv.npub}`);
-    
+
     // Verify that kvPubkey matches what we expect
     const decodedKvPubkey = nip19.decode(keys.kv.npub).data;
     if (decodedKvPubkey === kvPubkey) {
@@ -80,7 +78,7 @@ async function runTest() {
     } else {
       console.log("❌ kv.npub doesn't match the one we provided");
     }
-    
+
     // Verify that kvSecretKey matches what we expect
     if (keys.kv.nsec === kvNsec) {
       console.log("✅ kv.nsec matches the one we provided");
@@ -97,7 +95,7 @@ async function runTest() {
   await store.sync();
   const endTime = Date.now();
   const elapsed = endTime - startTime;
-  
+
   console.log(`sync() resolved in ${elapsed}ms`);
   if (elapsed < 100) {
     console.log("✅ sync() resolved immediately when no sync was pending");
@@ -109,7 +107,7 @@ async function runTest() {
   console.log("\n--- Testing basic storage ---");
   const testKey = 'test-key';
   const testValue = { message: 'Hello, world!', timestamp: Date.now() };
-  
+
   await store.set(testKey, testValue);
   console.log(`Set value for key "${testKey}":`, testValue);
 

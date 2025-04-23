@@ -1,10 +1,5 @@
-// Import fake-indexeddb polyfill first
-import 'fake-indexeddb/auto';
-
-// Import WebSocket implementation for Node.js environment
-import { useWebSocketImplementation } from 'nostr-tools/pool';
-import WebSocket from 'ws';
-useWebSocketImplementation(WebSocket);
+// Import common test utilities
+import { setupTestEnvironment, log } from './common.mjs';
 
 // Import necessary tools
 import { generateSecretKey, getPublicKey } from 'nostr-tools/pure';
@@ -13,10 +8,10 @@ import { createStore } from '../index.js';
 
 // Test configuration
 const TEST_NAMESPACE = 'sync-test-' + Math.floor(Math.random() * 1000000);
-const TEST_RELAY = 'wss://relay.damus.io';
 const SYNC_DELAY = 10000; // Maximum time to wait for sync to happen
 
-// Remove debug code
+// Setup test environment
+const { relayURLs } = setupTestEnvironment();
 
 async function runTest() {
   log(`Starting sync test with namespace: ${TEST_NAMESPACE}`);
@@ -46,7 +41,7 @@ async function runTest() {
     namespace: TEST_NAMESPACE,
     authNsec: nip19.nsecEncode(authSecretKey1),
     kvNsec: kvNsec,
-    relays: [TEST_RELAY],
+    relays: relayURLs,
     debounce: 100, // Use a small debounce for testing
     dbName: `client1-${TEST_NAMESPACE}`, // Unique database name for client 1
     debug: debugEnabled // Enable debug logging based on environment variable
@@ -56,7 +51,7 @@ async function runTest() {
     namespace: TEST_NAMESPACE,
     authNsec: nip19.nsecEncode(authSecretKey2),
     kvNsec: kvNsec,
-    relays: [TEST_RELAY],
+    relays: relayURLs,
     debounce: 100, // Use a small debounce for testing
     dbName: `client2-${TEST_NAMESPACE}`, // Unique database name for client 2
     debug: debugEnabled // Enable debug logging based on environment variable
@@ -83,7 +78,7 @@ async function runTest() {
     // Wait for sync to happen
     log(`Waiting for sync...`);
     await store1.sync();
-    
+
     // Give some time for the relay to propagate the event to client 2
     log(`Waiting for relay propagation (max ${SYNC_DELAY}ms)...`);
     await new Promise(resolve => setTimeout(resolve, SYNC_DELAY));
@@ -122,7 +117,7 @@ async function runTest() {
     // Wait for sync to happen
     log(`Waiting for sync...`);
     await store2.sync();
-    
+
     // Give some time for the relay to propagate the event to client 1
     log(`Waiting for relay propagation (max ${SYNC_DELAY}ms)...`);
     await new Promise(resolve => setTimeout(resolve, SYNC_DELAY));
@@ -162,7 +157,7 @@ async function runTest() {
     // Wait for client2 to publish its changes
     log(`Waiting for client2 to publish...`);
     await store2.sync();
-    
+
     // Give some time for the relay to propagate the events between clients
     log(`Waiting for relay propagation (max ${SYNC_DELAY}ms)...`);
     await new Promise(resolve => setTimeout(resolve, SYNC_DELAY));
@@ -246,7 +241,3 @@ runTest().catch(err => {
   log("Fatal error:", err);
   process.exit(1);
 });
-
-function log() {
-  console.log.apply(null, [new Date()].concat(Array.from(arguments)));
-}
