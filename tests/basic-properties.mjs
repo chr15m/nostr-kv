@@ -28,7 +28,6 @@ async function runTest() {
     kvNsec: kvNsec,
     relays: relayURLs,
     dbName: `test-${TEST_NAMESPACE}`,
-    debug: true
   });
 
   // Check that the store has the expected methods
@@ -121,6 +120,90 @@ async function runTest() {
     console.log("✅ Retrieved value matches set value");
   } else {
     console.log("❌ Retrieved value doesn't match set value");
+  }
+
+  // Test onChange with callback
+  console.log("\n--- Testing onChange with callback ---");
+
+  // Create a store with the test relays
+  const store2 = createStore({
+    namespace: TEST_NAMESPACE,
+    kvNsec: kvNsec,
+    relays: relayURLs,
+    dbName: `test2-${TEST_NAMESPACE}`,
+  });
+
+  let callbackResolve = null;
+  let changeDetected = false;
+
+  // Create a promise that will be resolved when the callback is triggered
+  let callbackPromise = new Promise(resolve => {
+    callbackResolve = resolve;
+  });
+
+  // Make a change that should trigger the callback
+  const changeKey = 'callback-test-key';
+  const changeValue = { message: 'This should trigger the callback', timestamp: Date.now() };
+
+  // Register a change listener that will also resolve our promise
+  const removeListener = store2.onChange((key, value) => {
+    console.log(`Change detected: key=${key}, value=`, value);
+    // ignore other changes unrelated to the key we're looking for
+    if (key == changeKey) {
+      changeDetected = true;
+      callbackResolve({ key, value });
+    }
+  });
+
+
+  console.log(`Setting value for key "${changeKey}" to trigger callback`);
+  await store.set(changeKey, changeValue);
+
+  // Wait for the store to sync
+  await store.sync();
+
+  // wait for the callback to fire
+  const result = await callbackPromise;
+
+  console.log("✅ onChange callback was triggered");
+
+  if (result.key === changeKey) {
+    console.log("✅ Detected key matches the key we changed");
+  } else {
+    console.log(`❌ Detected key "${result.key}" doesn't match the key we changed "${changeKey}"`);
+  }
+
+  if (JSON.stringify(result.value) === JSON.stringify(changeValue)) {
+    console.log("✅ Detected value matches the value we set");
+  } else {
+    console.log("❌ Detected value doesn't match the value we set");
+    console.log("Expected:", changeValue);
+    console.log("Received:", detectedValue);
+  }
+
+  // Test removing the listener
+  console.log("\n--- Testing listener removal ---");
+  removeListener();
+  console.log("Listener removed");
+
+  // Make another change that should not trigger the callback
+  const anotherKey = 'another-test-key';
+  const anotherValue = { message: 'This should not trigger the callback', timestamp: Date.now() };
+  changeDetected = false;
+
+  console.log(`Setting value for key "${anotherKey}" after removing listener`);
+  await store.set(anotherKey, anotherValue);
+
+  // Wait for the store to sync
+  await store.sync();
+
+  // Give a little time to ensure callback isn't triggered
+  await new Promise(resolve => setTimeout(resolve, 1000));
+
+  if (!changeDetected) {
+    console.log("✅ Callback was not triggered after removal");
+  } else {
+    console.log("❌ Callback was triggered even after removal");
   }
 
   // Clean up

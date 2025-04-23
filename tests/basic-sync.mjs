@@ -6,17 +6,6 @@ import { generateSecretKey, getPublicKey } from 'nostr-tools/pure';
 import * as nip19 from 'nostr-tools/nip19';
 import { createStore } from '../index.js';
 
-// catch any uncaught errors or promise errors and print them
-// Catch any uncaught exceptions
-process.on('uncaughtException', (error) => {
-  console.error('Uncaught Exception:', error);
-});
-
-// Catch unhandled promise rejections
-process.on('unhandledRejection', (reason, promise) => {
-  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
-});
-
 // Test configuration
 const TEST_NAMESPACE = 'sync-test-' + Math.floor(Math.random() * 1000000);
 
@@ -45,18 +34,13 @@ async function runTest() {
   log(`Client 1 authPubkey: ${authPubkey1}`);
   log(`Client 2 authPubkey: ${authPubkey2}`);
 
-  // Check if DEBUG environment variable is set
-  const debugEnabled = process.env.DEBUG !== undefined;
-
   // Create two stores with the same kvNsec but different authNsec and isolated databases
   const store1 = createStore({
     namespace: TEST_NAMESPACE,
     authNsec: nip19.nsecEncode(authSecretKey1),
     kvNsec: kvNsec,
     relays: relayURLs,
-    debounce: 100, // Use a small debounce for testing
     dbName: `client1-${TEST_NAMESPACE}`, // Unique database name for client 1
-    debug: debugEnabled // Enable debug logging based on environment variable
   });
 
   const store2 = createStore({
@@ -64,9 +48,7 @@ async function runTest() {
     authNsec: nip19.nsecEncode(authSecretKey2),
     kvNsec: kvNsec,
     relays: relayURLs,
-    debounce: 100, // Use a small debounce for testing
     dbName: `client2-${TEST_NAMESPACE}`, // Unique database name for client 2
-    debug: debugEnabled // Enable debug logging based on environment variable
   });
 
   // We'll use the promise-based onChange for waiting for changes
@@ -89,7 +71,7 @@ async function runTest() {
   ]);
 
   log(`Client 2 received change for key "${change.key}": ${JSON.stringify(change.value)}`);
-  
+
   // Add a small delay to ensure all updates are processed
   await new Promise(resolve => setTimeout(resolve, 200));
 
@@ -133,7 +115,7 @@ async function runTest() {
   ]);
 
   log(`Client 1 received change for key "${change2.key}": ${JSON.stringify(change2.value)}`);
-  
+
   // Add a small delay to ensure all updates are processed
   await new Promise(resolve => setTimeout(resolve, 200));
 
@@ -219,7 +201,7 @@ async function runTest() {
 
   log("\n--- All tests completed ---");
 
- 
+
   // Close connections
   await store1.close();
   await store2.close();

@@ -9,6 +9,19 @@ import WebSocket from 'ws';
 import { Server } from 'mock-socket';
 import debug from 'debug';
 
+// catch any uncaught errors or promise errors and print them
+// Catch any uncaught exceptions
+process.on('uncaughtException', (error) => {
+  console.error('Uncaught Exception:', error);
+  process.exit(1);
+});
+
+// Catch unhandled promise rejections
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+  process.exit(1);
+});
+
 // Setup debug loggers
 const logRelay = debug('nostr-kv:relay');
 const logTest = debug('nostr-kv:test');
@@ -123,7 +136,7 @@ export class MockRelay {
 
             // Collect matching subscriptions for delayed broadcast
             const matchingSubscriptions = [];
-            
+
             // Broadcast to all subscriptions
             for (const [subKey, sub] of this._subscriptions.entries()) {
               const { connId: targetConnId, subId, filters } = sub;
@@ -149,7 +162,7 @@ export class MockRelay {
                 logRelay(`Filters: ${JSON.stringify(filters)}`);
               }
             }
-            
+
             // Broadcast with random delays to simulate network latency
             matchingSubscriptions.forEach(sub => {
               // Random delay between 50-300ms to simulate network latency
