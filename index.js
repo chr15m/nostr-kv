@@ -6,7 +6,6 @@ import * as nip19 from 'nostr-tools/nip19';
 import createDebug from 'debug';
 
 // TODO: del should set a special key rather than actually deleting
-// TODO: onChange() should return a promise that resolves next time a change happens
 // TODO: put all the debounce and sync timers, resolvers, into one structure
 // TODO: crunch it down with msgpack
 // TODO: fail to set() if the msgpack raw size gets above configurable value
@@ -384,20 +383,38 @@ function createStore({
     },
 
     /**
-     * Register a callback for changes from other clients
-     * @param {Function} callback Function called with (key, newValue) when changes occur
-     * @returns {Function} Function to remove the listener
+     * Register a callback for changes from other clients or wait for the next change
+     * @param {Function} [callback] Optional function called with (key, newValue) when changes occur
+     * @returns {Function|Promise} Function to remove the listener or Promise that resolves with the next change
      */
     onChange(callback) {
-      changeListeners.push(callback);
-      return () => {
-        const index = changeListeners.indexOf(callback);
-        if (index !== -1) {
-          changeListeners.splice(index, 1);
-        }
-      };
-    },
+      // If callback is provided, add it to listeners and return removal function
+      if (typeof callback === 'function') {
+        changeListeners.push(callback);
+        return () => {
+          const index = changeListeners.indexOf(callback);
+          if (index !== -1) {
+            changeListeners.splice(index, 1);
+          }
+        };
+      }
 
+      // If no callback is provided, return a promise that resolves on next change
+      return new Promise(resolve => {
+        const oneTimeCallback = (key, value) => {
+          // Remove this listener immediately after it's called
+          const index = changeListeners.indexOf(oneTimeCallback);
+          if (index !== -1) {
+            changeListeners.splice(index, 1);
+          }
+          // Resolve with the change information
+          resolve({ key, value });
+        };
+
+        // Add the one-time callback to listeners
+        changeListeners.push(oneTimeCallback);
+      });
+    },
 
     /**
      * Close all relay connections

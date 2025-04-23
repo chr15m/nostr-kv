@@ -8,7 +8,7 @@ import { createStore } from '../index.js';
 
 // Test configuration
 const TEST_NAMESPACE = 'sync-test-' + Math.floor(Math.random() * 1000000);
-const SYNC_DELAY = 10000; // Maximum time to wait for sync to happen
+// No need for SYNC_DELAY anymore
 
 // Setup test environment
 const { relayURLs } = setupTestEnvironment();
@@ -57,12 +57,7 @@ async function runTest() {
     debug: debugEnabled // Enable debug logging based on environment variable
   });
 
-  // Set up change listener for store2
-  let syncReceived = false;
-  const removeListener = store2.onChange((key, value) => {
-    log(`Client 2 received change for key "${key}": ${JSON.stringify(value)}`);
-    syncReceived = true;
-  });
+  // We'll use the promise-based onChange for waiting for changes
 
   try {
     // Test 1: Client 1 writes, Client 2 should receive
@@ -75,13 +70,19 @@ async function runTest() {
     log(`Client 1 setting "${testKey}" to:`, testValue);
     await store1.set(testKey, testValue);
 
-    // Wait for sync to happen
-    log(`Waiting for sync...`);
-    await store1.sync();
+    // Wait for both client1 to sync AND client2 to receive the change
+    log(`Waiting for client1 to sync and client2 to receive the change...`);
+    const [_sync1, change] = await Promise.all([
+      store1.sync(),
+      store2.onChange()
+    ]);
 
-    // Give some time for the relay to propagate the event to client 2
-    log(`Waiting for relay propagation (max ${SYNC_DELAY}ms)...`);
-    await new Promise(resolve => setTimeout(resolve, SYNC_DELAY));
+    log(`Client 2 received change for key "${change.key}": ${JSON.stringify(change.value)}`);
+
+    // Verify the change is what we expect
+    if (change.key !== testKey) {
+      log(`❌ Unexpected key received: ${change.key}, expected: ${testKey}`);
+    }
 
     // Client 2 should have received the change via the onChange handler
     // Now verify by reading directly
@@ -97,15 +98,7 @@ async function runTest() {
     // Test 2: Client 2 writes, Client 1 should receive
     log("\n--- Test 2: Client 2 writes, Client 1 receives ---");
 
-    // Reset sync flag
-    syncReceived = false;
-
-    // Set up change listener for store1
-    let client1SyncReceived = false;
-    const removeListener1 = store1.onChange((key, value) => {
-      log(`Client 1 received change for key "${key}": ${JSON.stringify(value)}`);
-      client1SyncReceived = true;
-    });
+    // We'll use the promise-based onChange for client1 too
 
     // Client 2 sets a value
     const testKey2 = 'test-key-2-' + Date.now();
@@ -114,13 +107,19 @@ async function runTest() {
     log(`Client 2 setting "${testKey2}" to:`, testValue2);
     await store2.set(testKey2, testValue2);
 
-    // Wait for sync to happen
-    log(`Waiting for sync...`);
-    await store2.sync();
+    // Wait for both client2 to sync AND client1 to receive the change
+    log(`Waiting for client2 to sync and client1 to receive the change...`);
+    const [_sync2, change2] = await Promise.all([
+      store2.sync(),
+      store1.onChange()
+    ]);
 
-    // Give some time for the relay to propagate the event to client 1
-    log(`Waiting for relay propagation (max ${SYNC_DELAY}ms)...`);
-    await new Promise(resolve => setTimeout(resolve, SYNC_DELAY));
+    log(`Client 1 received change for key "${change2.key}": ${JSON.stringify(change2.value)}`);
+
+    // Verify the change is what we expect
+    if (change2.key !== testKey2) {
+      log(`❌ Unexpected key received: ${change2.key}, expected: ${testKey2}`);
+    }
 
     // Client 1 should have received the change
     const receivedValue2 = await store1.get(testKey2);
@@ -158,51 +157,60 @@ async function runTest() {
     log(`Waiting for client2 to publish...`);
     await store2.sync();
 
-    // Give some time for the relay to propagate the events between clients
-    log(`Waiting for relay propagation (max ${SYNC_DELAY}ms)...`);
-    await new Promise(resolve => setTimeout(resolve, SYNC_DELAY));
+    // Wait for changes to propagate between clients
+    log(`Waiting for changes to propagate between clients...`);
 
-    // Wait for client1 to receive client2's changes
-    log(`Waiting for client1 to receive client2's changes (max ${SYNC_DELAY}ms)...`);
-    await new Promise((resolve) => {
-      // If we already received the change, resolve immediately
-      store1.get(conflictKey).then(value => {
-        if (value && value.message === value2.message) {
+    // Wait for client1 to sync and client2 to receive the change
+    log(`Waiting for client1 to sync...`);
+    await store1.sync();
+
+    // Wait for client2 to sync and client1 to receive the change
+    log(`Waiting for client2 to sync...`);
+    await store2.sync();
+
+    // Now we need to wait for both clients to receive each other's changes
+    log(`Waiting for clients to receive each other's changes...`);
+
+    // Create a promise that resolves when client1 has the correct value
+    const client1ReceivesCorrectValue = new Promise(async (resolve) => {
+      // First check if we already have the right value
+      let client1Value = await store1.get(conflictKey);
+      if (client1Value && client1Value.message === value2.message) {
+        resolve();
+        return;
+      }
+
+      // If not, set up a one-time listener for the change
+      const removeListener = store1.onChange((key, value) => {
+        if (key === conflictKey && value && value.message === value2.message) {
+          removeListener();
           resolve();
-          return;
         }
-
-        const timeout = setTimeout(resolve, SYNC_DELAY);
-        const unsubscribe = store1.onChange((key, value) => {
-          if (key === conflictKey && value && value.message === value2.message) {
-            clearTimeout(timeout);
-            unsubscribe();
-            resolve();
-          }
-        });
       });
     });
 
-    // Wait for client2 to receive client1's changes (though client2's should win)
-    log(`Waiting for client2 to receive client1's changes (max ${SYNC_DELAY}ms)...`);
-    await new Promise((resolve) => {
-      // If we already have the right value, resolve immediately
-      store2.get(conflictKey).then(value => {
-        if (value && value.message === value2.message) {
-          resolve();
-          return;
-        }
+    // Create a promise that resolves when client2 has the correct value
+    const client2ReceivesCorrectValue = new Promise(async (resolve) => {
+      // First check if we already have the right value
+      let client2Value = await store2.get(conflictKey);
+      if (client2Value && client2Value.message === value2.message) {
+        resolve();
+        return;
+      }
 
-        const timeout = setTimeout(resolve, SYNC_DELAY);
-        const unsubscribe = store2.onChange((key) => {
-          if (key === conflictKey) {
-            clearTimeout(timeout);
-            unsubscribe();
-            resolve();
-          }
-        });
+      // If not, set up a one-time listener for the change
+      const removeListener = store2.onChange((key, value) => {
+        if (key === conflictKey && value && value.message === value2.message) {
+          removeListener();
+          resolve();
+        }
       });
     });
+
+    // Wait for both clients to have the correct value
+    await Promise.all([client1ReceivesCorrectValue, client2ReceivesCorrectValue]);
+
+    log(`Both clients have received updates for the conflict key`);
 
     // Both clients should have the later value
     const client1Final = await store1.get(conflictKey);
@@ -218,9 +226,7 @@ async function runTest() {
       log("❌ Test 3 FAILED: Clients have different values or incorrect value");
     }
 
-    // Clean up
-    removeListener();
-    removeListener1();
+    // No listeners to clean up with the promise-based approach
 
     log("\n--- All tests completed ---");
 
