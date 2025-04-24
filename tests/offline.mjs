@@ -46,6 +46,8 @@ async function runTest() {
     kvNsec: kvNsec,
     relays: relayURLs,
     dbName: `client1-${TEST_NAMESPACE}`, // Unique database name for client 1
+    maxRetryCount: 3, // Limit retries during testing
+    maxRetryDelay: 5000 // Cap retry delay at 5 seconds for testing
   });
 
   const store2 = createStore({
@@ -54,6 +56,8 @@ async function runTest() {
     kvNsec: kvNsec,
     relays: relayURLs,
     dbName: `client2-${TEST_NAMESPACE}`, // Unique database name for client 2
+    maxRetryCount: 3, // Limit retries during testing
+    maxRetryDelay: 5000 // Cap retry delay at 5 seconds for testing
   });
 
   // We'll create store3 later to simulate it being offline initially
@@ -91,10 +95,16 @@ async function runTest() {
 
     // Wait for sync between Client 1 and Client 2
     log(`Waiting for sync between online clients...`);
-    await Promise.all([
+    const onlinesync = await Promise.all([
       store1.sync(),
       store2.sync()
     ]);
+
+    if (onlinesync[0] == true && onlinesync[1] == true) {
+      log("✅ Sync successfully published to relays");
+    } else {
+      log("❌ Sync failed to publish to relays");
+    }
 
     // Additional wait to ensure propagation
     await new Promise(resolve => setTimeout(resolve, SYNC_DELAY));
@@ -128,6 +138,8 @@ async function runTest() {
       kvNsec: kvNsec,
       relays: relayURLs,
       dbName: `client3-${TEST_NAMESPACE}`, // Unique database name for client 3
+      maxRetryCount: 3, // Limit retries during testing
+      maxRetryDelay: 5000 // Cap retry delay at 5 seconds for testing
     });
 
     // Set up change listener for store3

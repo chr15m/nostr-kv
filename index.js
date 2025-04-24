@@ -32,6 +32,8 @@ const DEFAULT_DEBOUNCE = 1010;
  * @param {string[]} [options.relays] Array of relay URLs (defaults to predefined list)
  * @param {number} [options.debounce] Debounce time in ms for rapid updates (default: 1010)
  * @param {string} [options.dbName] Custom IndexedDB database name (useful for testing)
+ * @param {number} [options.maxRetryCount] Max number of retry attempts (0 = retry forever, default: 0)
+ * @param {number} [options.maxRetryDelay] Maximum delay between retries in ms (default: 60000)
  * @returns {Object} Store interface with get, set, del methods
  */
 function createStore({
@@ -41,6 +43,8 @@ function createStore({
   relays = DEFAULT_RELAYS,
   debounce = DEFAULT_DEBOUNCE,
   dbName = null,
+  maxRetryCount = 0,
+  maxRetryDelay = 60000,
 }) {
   if (!namespace) {
     throw new Error('Namespace is required');
@@ -85,6 +89,10 @@ function createStore({
   let syncPromise = null;
   let syncResolve = null;
   let receiveResolve = null;
+
+  // Variables for retry mechanism
+  let publishRetryCount = 0;
+  const BASE_RETRY_DELAY = 1000; // 1 second initial delay
 
   // Change listeners
   const changeListeners = [];
@@ -192,15 +200,46 @@ function createStore({
       });
 
       log('Published successfully to at least one relay');
-    } catch (error) {
-      logError('Error in publish process: %O', error);
-      throw error;
-    } finally {
-      // Resolve the sync promise
+
+      // Reset retry count on success
+      publishRetryCount = 0;
+
+      // Resolve the sync promise with success=true
       if (syncResolve) {
-        syncResolve();
+        syncResolve(true);
         syncPromise = null;
         syncResolve = null;
+      }
+    } catch (error) {
+      logError('Error in publish process: %O', error);
+
+      // Implement exponential backoff for retries
+      publishRetryCount++;
+
+      // Check if we should retry (either retry forever or under max count)
+      const shouldRetry = maxRetryCount === 0 || publishRetryCount < maxRetryCount;
+
+      if (shouldRetry) {
+        // Calculate delay with exponential backoff, capped at maxRetryDelay
+        const retryDelay = Math.min(
+          BASE_RETRY_DELAY * Math.pow(2, publishRetryCount - 1),
+          maxRetryDelay
+        );
+
+        logError(`Scheduling retry #${publishRetryCount} in ${retryDelay}ms`);
+
+        // Schedule retry
+        setTimeout(publishToNostr, retryDelay);
+      } else {
+        logError(`Max retry attempts (${maxRetryCount}) reached. Giving up.`);
+        publishRetryCount = 0;
+
+        // Resolve the sync promise with success=false
+        if (syncResolve) {
+          syncResolve(false);
+          syncPromise = null;
+          syncResolve = null;
+        }
       }
     }
   }
@@ -446,10 +485,10 @@ function createStore({
 
     /**
      * Wait for any pending sync to complete
-     * @returns {Promise<void>} Promise that resolves when sync is complete
+     * @returns {Promise<void>} Promise that resolves when sync is complete - resolves false if there is unsync'ed data (e.g. disconnected).
      */
     async sync() {
-      return syncPromise || Promise.resolve();
+      return syncPromise || Promise.resolve(true);
     },
 
     /**
