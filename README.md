@@ -17,10 +17,12 @@ nostr-kv is a browser library that provides a key-value storage system with seam
 
 ## Limitations
 
-- The fastest you can do sync'ed updates is 1 every second because event time is a unix timestamp (debounce handles this automatically).
-- Total data size in the kv should be smaller than 100kb or relays will time-out when you try to write.
+- The fastest you can do sync'ed updates is 1 every second because Nostr event time is a unix timestamp (debounce handles this automatically).
+- Total data size in the kv should be smaller than ~50kb or relays will time-out when you try to write.
 - Relays will rate-limit updates that happen too frequently, independently of the 1 second limit above.
 - Updates can take multiple seconds to propagate on busy relays.
+
+Overall you shouldn't expect to store large amounts of data or fast propagation times. Eventual consensus of small datasets.
 
 ## How It Works
 
@@ -51,11 +53,12 @@ import { createStore } from 'nostr-kv';
 const store = createStore({
   namespace: 'my-app',
   authNsec: 'your-auth-nsec', // Optional: will be generated if not provided
-  kvNsec: 'your-kv-nsec',     // Optional: will be generated if not provided
+  kvNsec: 'your-kv-nsec',     // Optional: will be generated if not provided - share across devices to sync
   relays: ['wss://relay.example.com'], // Optional: will use default relays if not provided
   debounce: 1000, // Optional: milliseconds to wait before syncing rapid changes (default: 1010)
   dbName: 'custom-db-name', // Optional: custom IndexedDB database name
-  debug: false // Optional: enable debug logging (default: false)
+  maxRetryCount: 3, // Optional: max number of retry attempts (0 = retry forever, default: 0)
+  maxRetryDelay: 60000 // Optional: maximum delay between retries in ms (default: 60000)
 });
 
 // Set a value
@@ -68,16 +71,63 @@ console.log(username); // 'satoshi'
 // Delete a value
 await store.del('username');
 
-// Listen for changes from other devices
-store.onChange((key, newValue) => {
+// Listen for changes from other devices (callback approach)
+const removeListener = store.onChange((key, newValue) => {
   console.log(`Key ${key} changed to ${newValue}`);
 });
+
+// Later, when you want to stop listening:
+removeListener();
+
+// Alternative: Promise-based approach to wait for the next change
+const change = await store.onChange();
+console.log(`Key ${change.key} changed to:`, change.value);
+
+// Wait for any incoming event from relays
+await store.onReceive();
+console.log('Received an update from a relay');
+
+// Force a sync and check if it was successful
+const syncSuccessful = await store.sync();
+if (syncSuccessful) {
+  console.log('Successfully synced with relays');
+} else {
+  console.log('Failed to sync with relays (possibly offline)');
+}
 
 // Access the keys used by this store (as NIP-19 encoded strings)
 const keys = store.keys();
 console.log(`Auth npub: ${keys.auth.npub}, KV npub: ${keys.kv.npub}`);
 console.log(`Auth nsec: ${keys.auth.nsec}, KV nsec: ${keys.kv.nsec}`);
 ```
+
+## API Reference
+
+### Configuration Options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `namespace` | string | (required) | Namespace for the store |
+| `authNsec` | string | (auto-generated) | Secret key for publishing events |
+| `kvNsec` | string | (auto-generated) | Secret key for encryption |
+| `relays` | string[] | Default relays | Array of relay URLs |
+| `debounce` | number | 1010 | Debounce time in ms for rapid updates |
+| `dbName` | string | `nostr-kv-${namespace}` | Custom IndexedDB database name |
+| `maxRetryCount` | number | 0 | Max retry attempts (0 = retry forever) |
+| `maxRetryDelay` | number | 60000 | Maximum delay between retries in ms |
+
+### Methods
+
+| Method | Description |
+|--------|-------------|
+| `get(key)` | Get a value from the store |
+| `set(key, value)` | Set a value in the store |
+| `del(key)` | Delete a value from the store |
+| `onChange([callback])` | Register a callback for changes or get a Promise for the next change |
+| `onReceive()` | Get a Promise that resolves when any data is received from relays |
+| `sync()` | Wait for pending sync to complete, returns boolean indicating success |
+| `close()` | Close all relay connections |
+| `keys()` | Get the cryptographic keys used by this store |
 
 ## Benefits
 

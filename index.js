@@ -6,6 +6,7 @@ import * as nip19 from 'nostr-tools/nip19';
 import createDebug from 'debug';
 
 // TODO: tests should crash on fail - use something like tape?
+// TODO: update on leading edge of the debounce and every second after that?
 // TODO: add more timeout races to tests so we can sensibly time out
 // TODO: add "dirty" flag to the datastore
 // TODO: automatically re-sync when window.online event happens and at startup
