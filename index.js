@@ -5,7 +5,6 @@ import { SimplePool } from 'nostr-tools/pool';
 import * as nip19 from 'nostr-tools/nip19';
 import createDebug from 'debug';
 
-// TODO: fix up the remaining tests to use the new promises
 // TODO: tests should crash on fail - use something like tape?
 // TODO: add more timeout races to tests so we can sensibly time out
 // TODO: add "dirty" flag to the datastore
