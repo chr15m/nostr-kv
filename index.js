@@ -285,12 +285,7 @@ function createStore({
           if (event.created_at > lastSyncTime) {
             lastSyncTime = event.created_at;
             // Store the last sync time in IndexedDB but don't sync it
-            await localSet(LAST_SYNC_KEY, {
-              value: lastSyncTime,
-              meta: {
-                lastModified: Date.now()
-              }
-            });
+            await localSet(LAST_SYNC_KEY, Date.now());
           }
 
           const decrypted = await decryptData(event.content);
@@ -374,17 +369,8 @@ function createStore({
 
   // Initialize by loading the last sync and publish times, then start subscription
   (async function initialize() {
-    try {
-      const syncData = await localGet(LAST_SYNC_KEY);
-      if (syncData && syncData.value) {
-        lastSyncTime = syncData.value;
-        log('Loaded last sync time: %s', new Date(lastSyncTime * 1000).toISOString());
-      }
-
-    } catch (error) {
-      logError('Error loading meta: %O', error);
-    }
-
+    lastSyncTime = await localGet(LAST_SYNC_KEY) || 0;
+    log('Loaded last sync time: %s', new Date(lastSyncTime * 1000).toISOString());
     // Start subscription
     subscribeToUpdates();
   })();
