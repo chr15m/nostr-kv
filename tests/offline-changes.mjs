@@ -80,11 +80,6 @@ async function runTest() {
     log(`Client 1 setting "${offlineKey2}" while offline`);
     await store1.set(offlineKey2, offlineValue2);
 
-    // We don't need to explicitly sync - the library will try to sync automatically
-    // and fail because we're offline, but it will handle the error internally
-    log("Changes made while offline, waiting a moment...");
-    await new Promise(resolve => setTimeout(resolve, 500)); // Give time for debounce to trigger sync attempt
-
     // Force a sync to check the return value
     const syncResult = await store1.sync();
     assert.strictEqual(syncResult, false, "❌ Expected sync to return false when offline");
@@ -156,27 +151,19 @@ async function runTest() {
     log(`Client 1 setting "${onlineKey}" while online`);
     await store1Online.set(onlineKey, onlineValue);
 
-    // The library will automatically try to sync after the debounce period
-    log("Changes made while online, waiting for debounce...");
-    await new Promise(resolve => setTimeout(resolve, 1500)); // Wait longer than debounce
-
-    // Wait for sync to happen
-    log(`Waiting for sync...`);
-    const syncResults = await Promise.all([
+    // Wait for sync to happen AND for store2 to receive the event
+    log(`Waiting for sync and receive...`);
+    const [_syncResult, _receiveResult] = await Promise.all([
       store1Online.sync(),
-      // No need to sync store2, just wait for receive
+      store2.onReceive() // Wait for store2 to process the incoming event
     ]);
 
-    log("store1Online sync result:", syncResults[0]);
-    assert.strictEqual(syncResults[0], true, "❌ Sync failed to publish to relays after going online");
+    log("store1Online sync result:", _syncResult);
+    assert.strictEqual(_syncResult, true, "❌ Sync failed to publish to relays after going online");
     log("✅ Sync successfully published to relays after going online");
+    log("✅ Store 2 received event");
 
-
-    // Additional wait to ensure propagation
-    log(`Waiting ${SYNC_DELAY}ms for propagation...`);
-    await new Promise(resolve => setTimeout(resolve, SYNC_DELAY));
-
-    // Check if Client 2 received the changes
+    // Now it should be safe to check if Client 2 received the changes
     const receivedValue1 = await store2.get(offlineKey1);
     const receivedValue2 = await store2.get(offlineKey2);
     const receivedValue3 = await store2.get(onlineKey);

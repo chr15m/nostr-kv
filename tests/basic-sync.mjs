@@ -74,9 +74,6 @@ async function runTest() {
 
   log(`Client 2 received change for key "${change.key}": ${JSON.stringify(change.value)}`);
 
-  // Add a small delay to ensure all updates are processed
-  await new Promise(resolve => setTimeout(resolve, 200));
-
   // Verify the change is what we expect
   assert.strictEqual(change.key, testKey, `❌ Test 1 FAILED: Unexpected key received: ${change.key}, expected: ${testKey}`);
 
@@ -116,9 +113,6 @@ async function runTest() {
 
   log(`Client 1 received change for key "${change2.key}": ${JSON.stringify(change2.value)}`);
 
-  // Add a small delay to ensure all updates are processed
-  await new Promise(resolve => setTimeout(resolve, 200));
-
   // Verify the change is what we expect
   assert.strictEqual(change2.key, testKey2, `❌ Test 2 FAILED: Unexpected key received: ${change2.key}, expected: ${testKey2}`);
 
@@ -135,8 +129,6 @@ async function runTest() {
   log(`   Expected: ${testValue2.message}`);
   log(`   Received: ${receivedValue2.message}`);
 
-
-  await new Promise(resolve => setTimeout(resolve, 1000));
 
   // Test 3: Last-write-wins conflict resolution (using internal timestamps)
   log("\n--- Test 3: Last-write-wins conflict resolution ---");
