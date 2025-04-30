@@ -1,10 +1,11 @@
 // Import common test utilities
-import { setupTestEnvironment } from './common.mjs';
+import { setupTestEnvironment, logTestStart } from './common.mjs';
 
 // Import necessary tools
 import { generateSecretKey, getPublicKey } from 'nostr-tools/pure';
 import * as nip19 from 'nostr-tools/nip19';
 import { createStore } from '../index.js';
+import assert from 'node:assert/strict'; // Import assert
 
 // Test configuration
 const TEST_NAMESPACE = 'properties-test-' + Math.floor(Math.random() * 1000000);
@@ -13,6 +14,7 @@ const TEST_NAMESPACE = 'properties-test-' + Math.floor(Math.random() * 1000000);
 const { relayURLs } = setupTestEnvironment();
 
 async function runTest() {
+  logTestStart(import.meta.url); // Log the start of the test
   console.log(`Starting basic properties test with namespace: ${TEST_NAMESPACE}`);
 
   // Generate a shared encryption key (kvNsec)
@@ -34,7 +36,7 @@ async function runTest() {
   console.log("\n--- Testing store interface ---");
 
   const expectedMethods = [
-    'get', 'set', 'del', 'onChange', 'sync', 'close'
+    'get', 'set', 'del', 'onChange', 'sync', 'close', 'keys', 'onReceive'
   ];
 
   let allMethodsPresent = true;
@@ -47,60 +49,41 @@ async function runTest() {
     }
   }
 
-  // Check for keys method
-  if (typeof store.keys === 'function') {
-    console.log(`✅ Store has keys method`);
-  } else {
-    console.log(`❌ Missing keys method`);
-    allMethodsPresent = false;
-  }
+  assert.ok(allMethodsPresent, "❌ Store is missing some expected methods");
+  console.log("✅ Store has all expected methods");
 
-  if (allMethodsPresent) {
-    console.log("✅ Store has all expected methods");
-  } else {
-    console.log("❌ Store is missing some expected methods");
-  }
 
   // Check keys method
   console.log("\n--- Testing keys method ---");
 
   const keys = store.keys();
-  if (keys && keys.auth && keys.kv) {
-    console.log("✅ store.keys() contains both auth and kv keys");
-    console.log(`auth.npub: ${keys.auth.npub}`);
-    console.log(`kv.npub: ${keys.kv.npub}`);
+  assert.ok(keys && keys.auth && keys.kv, "❌ store.keys() doesn't have the expected structure");
+  console.log("✅ store.keys() contains both auth and kv keys");
+  console.log(`auth.npub: ${keys.auth.npub}`);
+  console.log(`kv.npub: ${keys.kv.npub}`);
 
-    // Verify that kvPubkey matches what we expect
-    const decodedKvPubkey = nip19.decode(keys.kv.npub).data;
-    if (decodedKvPubkey === kvPubkey) {
-      console.log("✅ kv.npub matches the one we provided");
-    } else {
-      console.log("❌ kv.npub doesn't match the one we provided");
-    }
+  // Verify that kvPubkey matches what we expect
+  const decodedKvPubkey = nip19.decode(keys.kv.npub).data;
+  assert.strictEqual(decodedKvPubkey, kvPubkey, "❌ kv.npub doesn't match the one we provided");
+  console.log("✅ kv.npub matches the one we provided");
 
-    // Verify that kvSecretKey matches what we expect
-    if (keys.kv.nsec === kvNsec) {
-      console.log("✅ kv.nsec matches the one we provided");
-    } else {
-      console.log("❌ kv.nsec doesn't match the one we provided");
-    }
-  } else {
-    console.log("❌ store.keys() doesn't have the expected structure");
-  }
+  // Verify that kvSecretKey matches what we expect
+  assert.strictEqual(keys.kv.nsec, kvNsec, "❌ kv.nsec doesn't match the one we provided");
+  console.log("✅ kv.nsec matches the one we provided");
+
 
   // Test that sync() resolves immediately when there's no pending sync
   console.log("\n--- Testing sync() with no pending sync ---");
   const startTime = Date.now();
-  await store.sync();
+  const syncStatus = await store.sync(); // Check status
   const endTime = Date.now();
   const elapsed = endTime - startTime;
 
-  console.log(`sync() resolved in ${elapsed}ms`);
-  if (elapsed < 100) {
-    console.log("✅ sync() resolved immediately when no sync was pending");
-  } else {
-    console.log("❌ sync() took too long to resolve when no sync was pending");
-  }
+  console.log(`sync() resolved in ${elapsed}ms with status: ${syncStatus}`);
+  assert.ok(elapsed < 100, "❌ sync() took too long to resolve when no sync was pending");
+  assert.strictEqual(syncStatus, true, "❌ sync() should resolve true when no sync is pending");
+  console.log("✅ sync() resolved immediately and returned true when no sync was pending");
+
 
   // Test basic storage functionality
   console.log("\n--- Testing basic storage ---");
@@ -116,11 +99,9 @@ async function runTest() {
   const retrievedValue = await store.get(testKey);
   console.log(`Retrieved value for key "${testKey}":`, retrievedValue);
 
-  if (JSON.stringify(retrievedValue) === JSON.stringify(testValue)) {
-    console.log("✅ Retrieved value matches set value");
-  } else {
-    console.log("❌ Retrieved value doesn't match set value");
-  }
+  assert.deepStrictEqual(retrievedValue, testValue, "❌ Retrieved value doesn't match set value");
+  console.log("✅ Retrieved value matches set value");
+
 
   // Test onChange with callback
   console.log("\n--- Testing onChange with callback ---");
@@ -135,6 +116,7 @@ async function runTest() {
 
   let callbackResolve = null;
   let changeDetected = false;
+  let detectedValue = null; // Store detected value for assertion
 
   // Create a promise that will be resolved when the callback is triggered
   let callbackPromise = new Promise(resolve => {
@@ -151,6 +133,7 @@ async function runTest() {
     // ignore other changes unrelated to the key we're looking for
     if (key == changeKey) {
       changeDetected = true;
+      detectedValue = value; // Store the value
       callbackResolve({ key, value });
     }
   });
@@ -165,21 +148,15 @@ async function runTest() {
   // wait for the callback to fire
   const result = await callbackPromise;
 
+  assert.ok(changeDetected, "❌ onChange callback was not triggered");
   console.log("✅ onChange callback was triggered");
 
-  if (result.key === changeKey) {
-    console.log("✅ Detected key matches the key we changed");
-  } else {
-    console.log(`❌ Detected key "${result.key}" doesn't match the key we changed "${changeKey}"`);
-  }
+  assert.strictEqual(result.key, changeKey, `❌ Detected key "${result.key}" doesn't match the key we changed "${changeKey}"`);
+  console.log("✅ Detected key matches the key we changed");
 
-  if (JSON.stringify(result.value) === JSON.stringify(changeValue)) {
-    console.log("✅ Detected value matches the value we set");
-  } else {
-    console.log("❌ Detected value doesn't match the value we set");
-    console.log("Expected:", changeValue);
-    console.log("Received:", detectedValue);
-  }
+  assert.deepStrictEqual(result.value, changeValue, "❌ Detected value doesn't match the value we set");
+  console.log("✅ Detected value matches the value we set");
+
 
   // Test removing the listener
   console.log("\n--- Testing listener removal ---");
@@ -189,7 +166,7 @@ async function runTest() {
   // Make another change that should not trigger the callback
   const anotherKey = 'another-test-key';
   const anotherValue = { message: 'This should not trigger the callback', timestamp: Date.now() };
-  changeDetected = false;
+  changeDetected = false; // Reset flag
 
   console.log(`Setting value for key "${anotherKey}" after removing listener`);
   await store.set(anotherKey, anotherValue);
@@ -200,16 +177,15 @@ async function runTest() {
   // Give a little time to ensure callback isn't triggered
   await new Promise(resolve => setTimeout(resolve, 1000));
 
-  if (!changeDetected) {
-    console.log("✅ Callback was not triggered after removal");
-  } else {
-    console.log("❌ Callback was triggered even after removal");
-  }
+  assert.ok(!changeDetected, "❌ Callback was triggered even after removal");
+  console.log("✅ Callback was not triggered after removal");
+
 
   // Clean up
   console.log("\n--- Cleaning up ---");
   await store.close();
-  console.log("\nTest completed, connection closed.");
+  await store2.close(); // Close store2 as well
+  console.log("\nTest completed, connections closed.");
 }
 
 // Run the test

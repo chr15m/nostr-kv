@@ -1,10 +1,11 @@
 // Import common test utilities
-import { setupTestEnvironment } from './common.mjs';
+import { setupTestEnvironment, logTestStart } from './common.mjs';
 
 // Import necessary tools
 import { generateSecretKey, getPublicKey } from 'nostr-tools/pure';
 import * as nip19 from 'nostr-tools/nip19';
 import { createStore } from '../index.js';
+import assert from 'node:assert/strict'; // Import assert
 
 // Test configuration
 const TEST_NAMESPACE = 'sync-test-' + Math.floor(Math.random() * 1000000);
@@ -15,6 +16,7 @@ const log = console.log.bind(console);
 const { relayURLs } = setupTestEnvironment();
 
 async function runTest() {
+  logTestStart(import.meta.url); // Log the start of the test
   log(`Starting sync test with namespace: ${TEST_NAMESPACE}`);
 
   // Generate a shared encryption key (kvNsec)
@@ -76,24 +78,22 @@ async function runTest() {
   await new Promise(resolve => setTimeout(resolve, 200));
 
   // Verify the change is what we expect
-  if (change.key !== testKey) {
-    log(`❌ Unexpected key received: ${change.key}, expected: ${testKey}`);
-  }
+  assert.strictEqual(change.key, testKey, `❌ Test 1 FAILED: Unexpected key received: ${change.key}, expected: ${testKey}`);
 
   // Client 2 should have received the change via the onChange handler
   // Now verify by reading directly
   const receivedValue = await store2.get(testKey);
   log(`Client 2 reading "${testKey}":`, receivedValue);
 
-  if (receivedValue && receivedValue.message === testValue.message) {
-    log("\n✅ Test 1 PASSED: Client 2 successfully received data from Client 1");
-    log(`Expected: ${testValue.message}`);
-    log(`Received: ${receivedValue.message}`);
-  } else {
-    log("\n❌ Test 1 FAILED: Client 2 did not receive the correct data");
-    log(`Expected: ${testValue.message}`);
-    log(`Received: ${receivedValue ? receivedValue.message : 'undefined'}`);
-  }
+  // Assert that receivedValue exists and its message matches
+  assert.ok(receivedValue, `❌ Test 1 FAILED: Client 2 did not receive any data for key "${testKey}"`);
+  assert.strictEqual(receivedValue.message, testValue.message, `❌ Test 1 FAILED: Client 2 received incorrect message.`);
+
+  // If the assertions pass, log success
+  log(`\n✅ Test 1 PASSED: Client 2 successfully received data from Client 1`);
+  log(`   Expected: ${testValue.message}`);
+  log(`   Received: ${receivedValue.message}`);
+
 
   // Test 2: Client 2 writes, Client 1 should receive
   log("\n--- Test 2: Client 2 writes, Client 1 receives ---");
@@ -120,23 +120,21 @@ async function runTest() {
   await new Promise(resolve => setTimeout(resolve, 200));
 
   // Verify the change is what we expect
-  if (change2.key !== testKey2) {
-    log(`❌ Unexpected key received: ${change2.key}, expected: ${testKey2}`);
-  }
+  assert.strictEqual(change2.key, testKey2, `❌ Test 2 FAILED: Unexpected key received: ${change2.key}, expected: ${testKey2}`);
 
   // Client 1 should have received the change
   const receivedValue2 = await store1.get(testKey2);
   log(`Client 1 reading "${testKey2}":`, receivedValue2);
 
-  if (receivedValue2 && receivedValue2.message === testValue2.message) {
-    log("\n✅ Test 2 PASSED: Client 1 successfully received data from Client 2");
-    log(`Expected: ${testValue2.message}`);
-    log(`Received: ${receivedValue2.message}`);
-  } else {
-    log("\n❌ Test 2 FAILED: Client 1 did not receive the correct data");
-    log(`Expected: ${testValue2.message}`);
-    log(`Received: ${receivedValue2 ? receivedValue2.message : 'undefined'}`);
-  }
+  // Assert that receivedValue2 exists and its message matches
+  assert.ok(receivedValue2, `❌ Test 2 FAILED: Client 1 did not receive any data for key "${testKey2}"`);
+  assert.strictEqual(receivedValue2.message, testValue2.message, `❌ Test 2 FAILED: Client 1 received incorrect message.`);
+
+  // If the assertions pass, log success
+  log(`\n✅ Test 2 PASSED: Client 1 successfully received data from Client 2`);
+  log(`   Expected: ${testValue2.message}`);
+  log(`   Received: ${receivedValue2.message}`);
+
 
   await new Promise(resolve => setTimeout(resolve, 1000));
 
@@ -184,18 +182,18 @@ async function runTest() {
   log(`Client 1 final value for "${conflictKey}":`, client1Final);
   log(`Client 2 final value for "${conflictKey}":`, client2Final);
 
-  if (client1Final && client1Final.message === value2.message &&
-      client2Final && client2Final.message === value2.message) {
-    log("\n✅ Test 3 PASSED: Both clients have the latest value");
-    log(`Expected (both clients): ${value2.message}`);
-    log(`Client 1 received: ${client1Final ? client1Final.message : 'undefined'}`);
-    log(`Client 2 received: ${client2Final ? client2Final.message : 'undefined'}`);
-  } else {
-    log("\n❌ Test 3 FAILED: Clients have different values or incorrect value");
-    log(`Expected (both clients): ${value2.message}`);
-    log(`Client 1 received: ${client1Final ? client1Final.message : 'undefined'}`);
-    log(`Client 2 received: ${client2Final ? client2Final.message : 'undefined'}`);
-  }
+  // Assert both clients have the correct final value
+  assert.ok(client1Final, `❌ Test 3 FAILED: Client 1 has no value for "${conflictKey}"`);
+  assert.strictEqual(client1Final.message, value2.message, `❌ Test 3 FAILED: Client 1 has incorrect value.`);
+  assert.ok(client2Final, `❌ Test 3 FAILED: Client 2 has no value for "${conflictKey}"`);
+  assert.strictEqual(client2Final.message, value2.message, `❌ Test 3 FAILED: Client 2 has incorrect value.`);
+
+  // If assertions pass, log success
+  log("\n✅ Test 3 PASSED: Both clients have the latest value");
+  log(`   Expected (both clients): ${value2.message}`);
+  log(`   Client 1 received: ${client1Final.message}`);
+  log(`   Client 2 received: ${client2Final.message}`);
+
 
   // No listeners to clean up with the promise-based approach
 
@@ -209,7 +207,7 @@ async function runTest() {
   log("Test completed, connections closed.");
 
   // Give time for any final log messages to be printed
-  // process.exit(0);
+  // No need for process.exit(0); successful completion implies exit code 0
 }
 
 // Run the test

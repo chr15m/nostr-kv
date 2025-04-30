@@ -1,14 +1,16 @@
 // Import common test utilities
-import { setupTestEnvironment } from './common.mjs';
+import { setupTestEnvironment, logTestStart } from './common.mjs';
 
 // Import necessary tools
 import { generateSecretKey, getPublicKey } from 'nostr-tools/pure';
 import * as nip19 from 'nostr-tools/nip19';
 import { createStore } from '../index.js';
+import assert from 'node:assert/strict'; // Import assert
 
 // Test configuration
 const TEST_NAMESPACE = 'rapidfire-test-' + Math.floor(Math.random() * 1000000);
 const SYNC_DELAY = 3000; // Time to wait for sync to happen
+const DEBOUNCE_TIME = 1100; // Use a specific debounce time > 1s
 
 // Setup test environment
 const { relayURLs } = setupTestEnvironment();
@@ -17,6 +19,7 @@ const { relayURLs } = setupTestEnvironment();
 const log = console.log.bind(console);
 
 async function runTest() {
+  logTestStart(import.meta.url); // Log the start of the test
   log(`Starting rapidfire test with namespace: ${TEST_NAMESPACE}`);
 
   // Generate a shared encryption key (kvNsec)
@@ -42,7 +45,7 @@ async function runTest() {
     authNsec: nip19.nsecEncode(authSecretKey1),
     kvNsec: kvNsec,
     relays: relayURLs,
-    debounce: 500, // Use a longer debounce for testing
+    debounce: DEBOUNCE_TIME, // Use a specific debounce for testing
     dbName: `client1-${TEST_NAMESPACE}` // Unique database name for client 1
   });
 
@@ -51,7 +54,7 @@ async function runTest() {
     authNsec: nip19.nsecEncode(authSecretKey2),
     kvNsec: kvNsec,
     relays: relayURLs,
-    debounce: 100, // Use a small debounce for testing
+    debounce: 100, // Receiver debounce doesn't matter much here
     dbName: `client2-${TEST_NAMESPACE}` // Unique database name for client 2
   });
 
@@ -67,8 +70,9 @@ async function runTest() {
     log("\n--- Test: Rapidfire changes to test debounce and queuing ---");
 
     const baseKey = 'rapid-key-';
-    const numKeys = 10;
+    const numKeys = 5; // Reduced number for faster testing
     const expectedKeys = [];
+    const expectedValues = {};
 
     log(`Making ${numKeys} rapid changes...`);
 
@@ -82,6 +86,7 @@ async function runTest() {
       const key = `${baseKey}${i}`;
       expectedKeys.push(key);
       const value = { message: `Value ${i}`, timestamp: Date.now() };
+      expectedValues[key] = value;
 
       // Don't await here - we want to make changes rapidly
       store1.set(key, value);
@@ -91,14 +96,19 @@ async function runTest() {
     }
 
     // Wait for sync and receive to happen
-    log(`Waiting for sync and receive...`);
-    await Promise.all([
-      store2.onReceive(),
-      store1.sync(),
-    ]);
+    log(`Waiting for sync and receive (debounce: ${DEBOUNCE_TIME}ms)...`);
+    const syncPromise1 = store1.sync(); // Get the promise representing the sync operation
+    const receivePromise2 = store2.onReceive(); // Wait for the receiver to get *something*
+
+    // Wait for the sync to complete and the receiver to get at least one event
+    await Promise.all([syncPromise1, receivePromise2]);
+    log("Initial sync/receive completed.");
+
+    // Add extra delay to ensure all events are processed by store2
+    await new Promise(resolve => setTimeout(resolve, SYNC_DELAY));
 
     // Check if all keys were received by Client 2
-    log(`Client 2 received changes for ${changedKeys.size} keys`);
+    log(`Client 2 received changes for ${changedKeys.size} keys: ${Array.from(changedKeys).join(', ')}`);
 
     let allKeysReceived = true;
     for (const key of expectedKeys) {
@@ -106,112 +116,126 @@ async function runTest() {
       if (!value) {
         log(`❌ Missing value for key: ${key}`);
         allKeysReceived = false;
+      } else {
+        // Also check the value content
+        assert.deepStrictEqual(value, expectedValues[key], `❌ Incorrect value received for key: ${key}`);
       }
     }
 
-    if (allKeysReceived) {
-      log("✅ TEST PASSED: All rapidfire changes were successfully synced");
-    } else {
-      log("❌ TEST FAILED: Some rapidfire changes were not synced");
-    }
+    assert.ok(allKeysReceived, "❌ TEST FAILED: Some rapidfire changes were not synced or had incorrect values");
+    log("✅ TEST PASSED: All rapidfire changes were successfully synced with correct values");
 
-    // Test: Update the same key multiple times in rapid succession
-    log("\n--- Test: Multiple updates to the same key ---");
+
+    // Test: Update the same key multiple times in rapid succession (within debounce period)
+    log("\n--- Test: Multiple updates to the same key (within debounce) ---");
 
     const singleKey = 'single-key';
     const finalValue = { message: "Final value", timestamp: Date.now() };
+    const intermediateValues = [];
 
     // Update the same key multiple times rapidly
-    for (let i = 0; i < 10; i++) {
+    for (let i = 0; i < 5; i++) { // Reduced number
       const value = { message: `Intermediate value ${i}`, timestamp: Date.now() };
+      intermediateValues.push(value);
       await store1.set(singleKey, value);
-      // Small delay between updates
+      // Small delay between updates, well within debounce
       await createSmallDelay(Math.floor(Math.random() * 50));
     }
 
-    // Set the final value
+    // Set the final value just before the debounce timer would fire
     await store1.set(singleKey, finalValue);
 
     // Wait for sync and receive to happen
-    log(`Waiting for sync and receive...`);
-    await Promise.all([
-      store2.onReceive(),
-      store1.sync(),
-    ]);
-    
+    log(`Waiting for sync and receive (debounce: ${DEBOUNCE_TIME}ms)...`);
+    const syncPromiseSingle = store1.sync();
+    const receivePromiseSingle = store2.onReceive(); // Wait for the update related to singleKey
+
+    await Promise.all([syncPromiseSingle, receivePromiseSingle]);
+    log("Sync/receive for single key completed.");
+    await new Promise(resolve => setTimeout(resolve, SYNC_DELAY)); // Extra propagation time
+
     // Check if Client 2 has the final value
     const receivedValue = await store2.get(singleKey);
     log(`Client 2 final value for "${singleKey}":`, receivedValue);
 
-    if (receivedValue && receivedValue.message === finalValue.message) {
-      log("✅ TEST PASSED: Final value was correctly synced");
-    } else {
-      log("❌ TEST FAILED: Final value was not correctly synced");
-    }
+    assert.ok(receivedValue, `❌ Final value for ${singleKey} was not received`);
+    assert.strictEqual(receivedValue.message, finalValue.message, "❌ Final value was not correctly synced");
+    log("✅ TEST PASSED: Final value was correctly synced after rapid updates");
+
 
     // Test: Updates to the same key that cross debounce boundaries
+    // This test is less deterministic due to network/relay timing.
+    // We expect *at least* the final value to be present.
     log("\n--- Test: Updates crossing debounce boundaries ---");
 
     const crossDebounceKey = 'cross-debounce-key';
     const finalCrossValue = { message: "Final cross-debounce value", timestamp: Date.now() };
-    
-    log(`Making 20 updates to the same key with 110ms delay (crosses debounce boundary)...`);
-    
+
+    log(`Making 3 updates to the same key with ${DEBOUNCE_TIME + 100}ms delay...`);
+
     // Track received values for this key
     const receivedCrossValues = [];
     const crossValueListener = store2.onChange((key, value) => {
       if (key === crossDebounceKey) {
-        // log(`Client 2 received change for key "${key}": ${JSON.stringify(value)}`);
+        log(` -> Client 2 received change for key "${key}": ${JSON.stringify(value)}`);
         receivedCrossValues.push(value);
       }
     });
 
     // Update the same key multiple times with a delay that will cross debounce boundaries
-    for (let i = 0; i < 20; i++) {
+    for (let i = 0; i < 3; i++) { // Reduced number
       const value = { message: `Cross-debounce value ${i}`, timestamp: Date.now() };
       await store1.set(crossDebounceKey, value);
-      // 110ms delay will ensure we cross debounce boundaries
-      await createSmallDelay(110);
+      // Delay longer than debounce time
+      await createSmallDelay(DEBOUNCE_TIME + 100);
+      // Wait for the sync triggered by this set to likely complete
+      await store1.sync();
+      log(`Update ${i} sent and synced.`);
     }
 
     // Set the final value
+    log("Setting final cross-debounce value...");
     await store1.set(crossDebounceKey, finalCrossValue);
 
-    // Wait for sync and receive to happen
-    log(`Waiting for sync and receive...`);
-    await Promise.all([
-      store2.onReceive(),
-      store1.sync(),
-    ]);
-    
+    // Wait for sync and receive to happen for the final value
+    log(`Waiting for final sync and receive...`);
+    const syncPromiseCross = store1.sync();
+    const receivePromiseCross = store2.onReceive(); // Wait for the final update
+
+    await Promise.all([syncPromiseCross, receivePromiseCross]);
+    log("Sync/receive for final cross-debounce value completed.");
+    await new Promise(resolve => setTimeout(resolve, SYNC_DELAY)); // Extra propagation time
+
     // Remove the listener
-    crossValueListener();
-    
+    crossValueListener(); // Use the returned function to remove
+
     // Check if Client 2 has the final value
     const receivedCrossValue = await store2.get(crossDebounceKey);
     log(`Client 2 final value for "${crossDebounceKey}":`, receivedCrossValue);
-    log(`Client 2 received ${receivedCrossValues.length} updates for this key`);
+    log(`Client 2 received ${receivedCrossValues.length} updates in total for this key`);
 
-    if (receivedCrossValue && receivedCrossValue.message === finalCrossValue.message) {
-      log("✅ TEST PASSED: Final cross-debounce value was correctly synced");
-    } else {
-      log("❌ TEST FAILED: Final cross-debounce value was not correctly synced");
-    }
+    assert.ok(receivedCrossValue, `❌ Final cross-debounce value for ${crossDebounceKey} was not received`);
+    assert.strictEqual(receivedCrossValue.message, finalCrossValue.message, "❌ Final cross-debounce value was not correctly synced");
+    // We can't reliably assert the number of intermediate updates received due to network timing.
+    log("✅ TEST PASSED: Final cross-debounce value was correctly synced");
 
-    // Clean up
+
+    // Clean up main listener
     removeListener();
 
     log("\n--- All tests completed ---");
 
   } catch (error) {
     console.error("Test failed with error:", error);
+    // Re-throw the error to ensure non-zero exit code
+    throw error;
   } finally {
     // Close connections
     await store1.close();
     await store2.close();
 
     log("Test completed, connections closed.");
-    process.exit(0);
+    // No need for process.exit(0); successful completion implies exit code 0
   }
 }
 

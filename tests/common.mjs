@@ -8,6 +8,8 @@ import { matchFilters } from 'nostr-tools/filter';
 import WebSocket from 'ws';
 import { Server } from 'mock-socket';
 import debug from 'debug';
+import path from 'node:path'; // Import path for filename logic
+import { fileURLToPath } from 'node:url'; // Import fileURLToPath for filename logic
 
 // catch any uncaught errors or promise errors and print them
 // Catch any uncaught exceptions
@@ -267,4 +269,14 @@ export function setupTestEnvironment() {
  */
 export function log() {
   logTest.apply(null, Array.from(arguments));
+}
+
+/**
+ * Logs the start of a test file.
+ * @param {string} importMetaUrl - The import.meta.url of the calling test file.
+ */
+export function logTestStart(importMetaUrl) {
+  const __filename = fileURLToPath(importMetaUrl);
+  const currentFileName = path.basename(__filename);
+  console.log(`\n--- Running test: ${currentFileName} ---`);
 }

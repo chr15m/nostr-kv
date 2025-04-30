@@ -5,7 +5,7 @@
   "type": "module",
   "main": "index.js",
   "scripts": {
-    "test": "for f in tests/*; do node $f; done",
+    "test": "for f in tests/*.mjs; do echo \"Running $f\"; node \"$f\" || exit 1; done",
     "lint": "jshint index.js tests/*"
   },
   "dependencies": {
