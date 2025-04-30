@@ -5,12 +5,15 @@ import { SimplePool } from 'nostr-tools/pool';
 import * as nip19 from 'nostr-tools/nip19';
 import createDebug from 'debug';
 
-// TODO: del should set a special key rather than actually deleting
-// TODO: add "dirty" flag to the datastore
-// TODO: crunch it down with msgpack
+// TODO: shorten names from value to v and lastModified to t
+// TODO: del should set a special key "d" and v to nil, rather than actually deleting
+// TODO: add "dirty" flag to the datastore and set on set, unset on successful sync
+// TODO: crunch the data down with msgpack
+// TODO: remove idb-keyval to use localStorage
 // TODO: fail to set() if the msgpack raw size gets above configurable value
 
 // TODO: make the publishing thread clearer and more sequential - single fn with delays and flag checks
+// TODO: more robust testing of the publishing thread to check for race conditions and deadlocks
 
 // TODO: automatically re-sync when window.online event happens and at startup
 // TODO: tests should crash on fail - use something like tape?
