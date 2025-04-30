@@ -5,11 +5,7 @@
   "type": "module",
   "main": "index.js",
   "scripts": {
-    "test": "node tests/basic-sync.mjs",
-    "test:offline": "node tests/offline-test.mjs",
-    "test:rapidfire": "node tests/rapidfire-changes.mjs",
-    "test:offline-changes": "node tests/offline-changes.mjs",
-    "test:all": "npm run test && npm run test:offline && npm run test:rapidfire && npm run test:offline-changes",
+    "test": "for f in tests/*; do node $f; done",
     "lint": "jshint index.js tests/*"
   },
   "dependencies": {
