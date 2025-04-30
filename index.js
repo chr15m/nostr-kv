@@ -5,16 +5,18 @@ import { SimplePool } from 'nostr-tools/pool';
 import * as nip19 from 'nostr-tools/nip19';
 import createDebug from 'debug';
 
-// TODO: tests should crash on fail - use something like tape?
-// TODO: update on leading edge of the debounce and every second after that?
-// TODO: add more timeout races to tests so we can sensibly time out
-// TODO: add "dirty" flag to the datastore
-// TODO: automatically re-sync when window.online event happens and at startup
 // TODO: del should set a special key rather than actually deleting
-// TODO: put all the debounce and sync timers, resolvers, into one structure
+// TODO: add "dirty" flag to the datastore
 // TODO: crunch it down with msgpack
 // TODO: fail to set() if the msgpack raw size gets above configurable value
+
 // TODO: make the publishing thread clearer and more sequential - single fn with delays and flag checks
+
+// TODO: automatically re-sync when window.online event happens and at startup
+// TODO: tests should crash on fail - use something like tape?
+// TODO: update on leading edge of the debounce and every second after that? option to throttle?
+// TODO: add more timeout races to tests so we can sensibly time out
+// TODO: put all the debounce and sync timers, resolvers, into one structure
 
 // Default relays that are known to be reliable
 const DEFAULT_RELAYS = [
