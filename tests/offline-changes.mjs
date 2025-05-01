@@ -9,7 +9,6 @@ import assert from 'node:assert/strict'; // Import assert
 
 // Test configuration
 const TEST_NAMESPACE = 'offline-changes-test-' + Math.floor(Math.random() * 1000000);
-const SYNC_DELAY = 2000; // Time to wait for sync to happen
 
 // Setup test environment
 const { relayURLs } = setupTestEnvironment();

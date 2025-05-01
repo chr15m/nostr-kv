@@ -266,6 +266,24 @@ export function setupTestEnvironment() {
 }
 
 /**
+ * Helper to wait for multiple receives to settle down.
+ */
+export const waitForQuietReceive = (store, debounceMs) =>
+  store.onReceive().then(() =>
+    new Promise(resolve => {
+      let timerId;
+      Promise.race([
+        new Promise(r => timerId = setTimeout(() => r('timer'), debounceMs)),
+        store.onReceive().then(() => 'event')
+      ]).then(winner => {
+        clearTimeout(timerId);
+        resolve(winner === 'event' ? waitForQuietReceive(store, debounceMs) : undefined);
+      });
+    })
+  );
+
+
+/**
  * Helper to log with timestamp
  */
 export function log() {

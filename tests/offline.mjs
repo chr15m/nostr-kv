@@ -1,5 +1,5 @@
 // Import common test utilities
-import { setupTestEnvironment, logTestStart } from './common.mjs';
+import { setupTestEnvironment, logTestStart, waitForQuietReceive } from './common.mjs';
 
 // Import necessary tools
 import { generateSecretKey, getPublicKey } from 'nostr-tools/pure';
@@ -9,7 +9,7 @@ import assert from 'node:assert/strict'; // Import assert
 
 // Test configuration
 const TEST_NAMESPACE = 'offline-test-' + Math.floor(Math.random() * 1000000);
-const SYNC_DELAY = 2000; // Time to wait for sync to happen
+const DEBOUNCE_TIME = 1010; // Time to wait for sync to happen
 
 // Setup test environment
 const { relayURLs } = setupTestEnvironment();
@@ -153,24 +153,8 @@ async function runTest() {
 
     // Wait for Client 3 to sync and catch up
     log(`Waiting for offline client to catch up...`);
-
-    // Wait for at least one receive event or timeout after a while
-    const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout waiting for store3.onReceive()')), SYNC_DELAY * 3));
-    try {
-      await Promise.race([
-        store3.onReceive(), // Wait for the first event to arrive
-        timeoutPromise
-      ]);
-      log("Client 3 received at least one event.");
-    } catch (err) {
-      log("Warning: Timed out waiting for the first event from store3, proceeding anyway...");
-      // Don't fail the test here, maybe it just took longer
-    }
-
-
-    // Additional wait to ensure all changes are processed
-    // TODO: Replace this with waiting for multiple onChange events
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    await waitForQuietReceive(store3, DEBOUNCE_TIME);
+    log("Client 3 receives have settled down.");
 
     // Verify Client 3 caught up with all changes
     const client3Key1 = await store3.get(key1);
