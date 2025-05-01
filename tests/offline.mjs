@@ -99,16 +99,14 @@ async function runTest() {
     // Wait for sync between Client 1 and Client 2
     log(`Waiting for sync between online clients...`);
     const onlinesync = await Promise.all([
+      store1.onReceive(),
+      store2.onReceive(),
       store1.sync(),
-      store2.sync()
+      store2.sync(),
     ]);
 
-    assert.ok(onlinesync[0] === true && onlinesync[1] === true, "❌ Sync failed to publish to relays for online clients");
+    assert.ok(onlinesync[2] === true && onlinesync[3] === true, "❌ Sync failed to publish to relays for online clients");
     log("✅ Sync successfully published to relays for online clients");
-
-
-    // Additional wait to ensure propagation
-    await new Promise(resolve => setTimeout(resolve, SYNC_DELAY));
 
     // Verify Client 1 and Client 2 are in sync
     const client1Key1 = await store1.get(key1);
@@ -171,6 +169,7 @@ async function runTest() {
 
 
     // Additional wait to ensure all changes are processed
+    // TODO: Replace this with waiting for multiple onChange events
     await new Promise(resolve => setTimeout(resolve, 2000));
 
     // Verify Client 3 caught up with all changes
