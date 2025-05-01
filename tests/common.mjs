@@ -249,6 +249,7 @@ export function setupTestEnvironment() {
     useWebSocketImplementation(WebSocket);
     logTest(`Using real relays: ${realRelays.join(', ')}`);
   } else {
+    useWebSocketImplementation(null);
     // For mock relays, we don't need to set a custom WebSocket implementation
     logTest('Using mock relays');
   }
