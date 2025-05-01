@@ -7,6 +7,20 @@ import * as nip19 from 'nostr-tools/nip19';
 import { createStore } from '../index.js';
 import assert from 'node:assert/strict'; // Import assert
 
+const waitForQuietReceive = (store, debounceMs) =>
+  store.onReceive().then(() =>
+    new Promise(resolve => {
+      let timerId;
+      Promise.race([
+        new Promise(r => timerId = setTimeout(() => r('timer'), debounceMs)),
+        store.onReceive().then(() => 'event')
+      ]).then(winner => {
+        clearTimeout(timerId);
+        resolve(winner === 'event' ? waitForQuietReceive(store, debounceMs) : undefined);
+      });
+    })
+  );
+
 // Test configuration
 const TEST_NAMESPACE = 'rapidfire-test-' + Math.floor(Math.random() * 1000000);
 const SYNC_DELAY = 3000; // Time to wait for sync to happen
@@ -104,9 +118,6 @@ async function runTest() {
     await Promise.all([syncPromise1, receivePromise2]);
     log("Initial sync/receive completed.");
 
-    // Add extra delay to ensure all events are processed by store2
-    await new Promise(resolve => setTimeout(resolve, SYNC_DELAY));
-
     // Check if all keys were received by Client 2
     log(`Client 2 received changes for ${changedKeys.size} keys: ${Array.from(changedKeys).join(', ')}`);
 
@@ -152,7 +163,6 @@ async function runTest() {
 
     await Promise.all([syncPromiseSingle, receivePromiseSingle]);
     log("Sync/receive for single key completed.");
-    await new Promise(resolve => setTimeout(resolve, SYNC_DELAY)); // Extra propagation time
 
     // Check if Client 2 has the final value
     const receivedValue = await store2.get(singleKey);
@@ -175,7 +185,7 @@ async function runTest() {
 
     // Track received values for this key
     const receivedCrossValues = [];
-    const crossValueListener = store2.onChange((key, value) => {
+    const crossValueListenerRemove = store2.onChange((key, value) => {
       if (key === crossDebounceKey) {
         log(` -> Client 2 received change for key "${key}": ${JSON.stringify(value)}`);
         receivedCrossValues.push(value);
@@ -199,15 +209,11 @@ async function runTest() {
 
     // Wait for sync and receive to happen for the final value
     log(`Waiting for final sync and receive...`);
-    const syncPromiseCross = store1.sync();
-    const receivePromiseCross = store2.onReceive(); // Wait for the final update
-
-    await Promise.all([syncPromiseCross, receivePromiseCross]);
+    await Promise.all([waitForQuietReceive(store2, DEBOUNCE_TIME), store1.sync()]);
     log("Sync/receive for final cross-debounce value completed.");
-    await new Promise(resolve => setTimeout(resolve, SYNC_DELAY)); // Extra propagation time
 
     // Remove the listener
-    crossValueListener(); // Use the returned function to remove
+    crossValueListenerRemove(); // Use the returned function to remove
 
     // Check if Client 2 has the final value
     const receivedCrossValue = await store2.get(crossDebounceKey);
