@@ -7,10 +7,12 @@ import createDebug from 'debug';
 
 // TODO: shorten names from value to v and lastModified to t
 // TODO: del should set a special key "d" and v to nil, rather than actually deleting
+// TODO: lastSyncTime should be updated after successful processing not before
 // TODO: add "dirty" flag to the datastore and set on set, unset on successful sync
 // TODO: crunch the data down with msgpack
 // TODO: remove idb-keyval to use localStorage
 // TODO: fail to set() if the msgpack raw size gets above configurable value
+// TODO: investigate initial sync race: local changes on startup, might be published before merging recent remote changes received during initial connect
 
 // TODO: make the publishing thread clearer and more sequential - single fn with delays and flag checks
 // TODO: more robust testing of the publishing thread to check for race conditions and deadlocks
