@@ -128,6 +128,7 @@
   ;          recur
   ;          ms = 1 + backoff-timing[iteration || 0]
   ;     else
+  ;        set :running and :queued to nil
   ;        err
   ;   else
   ;     set last-write
