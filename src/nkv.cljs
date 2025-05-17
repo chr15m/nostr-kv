@@ -164,7 +164,11 @@
       ; if received is more recent
       (> remote-last-modified local-last-modified)
       ; update local item
-      (nkv-set-raw nkvi k remote-value)
+      (do
+        (nkv-set-raw nkvi k remote-value)
+        ; run callback with update
+        (when (fn? (:onChange nkvi))
+          ((:onChange nkvi) k remote-value)))
       ; else if received is older (remote out of date)
       (< remote-last-modified local-last-modified)
       ; set local.last-synced to received.last-synced to force key re-sync
@@ -191,17 +195,19 @@
   "Create a new Nostr-synced key-value store.
   opts:
   - ns = namespace for this store (default: null)
-  - kind = nostr kind (default: 31337)
   - sk = secret key (default: generated key bytes)
+  - onChange = callback `(k, v)=>` called when a remote updates a key
+  - kind = nostr kind (default: 31337)
   - relays (default: [relay.damus.io, relay.nostr.band])"
   ; TODO: let the user pass in storage and get/set/list calls
   [opts]
   (subscribe-to-updates
     (merge
       {:ns nil
-       :kind 31337
        :sk (or (:sk opts)
                (NostrTools.generateSecretKey))
+       :onChange nil
+       :kind 31337
        :relays default-relays
        ; internal
        :pool (NostrTools.pool.SimplePool.)
