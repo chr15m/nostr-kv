@@ -42,7 +42,7 @@
   ; hack to get cheap cross-platform hashing of the namespace
   ; without using async webcrypto or importing another dep
   (NostrTools.getEventHash
-    #js {:kind 33142
+    #js {:kind 0
          :created_at 0
          :tags #js []
          :pubkey (pubkey (:sk nkvi))
