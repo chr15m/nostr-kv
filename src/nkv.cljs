@@ -58,7 +58,9 @@
 (defn nkv-get-raw [nkvi k]
   (as-> k k
     (nkv-key nkvi k)
-    (.getItem js/localStorage k)
+    (try
+      (.getItem js/localStorage k)
+      (catch :default _e nil))
     (js/JSON.parse k)
     (or k #js {})))
 
