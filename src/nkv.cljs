@@ -59,7 +59,8 @@
   (as-> k k
     (nkv-key nkvi k)
     (.getItem js/localStorage k)
-    (js/JSON.parse k)))
+    (js/JSON.parse k)
+    (or k #js {})))
 
 (defn nkv-set-raw [nkvi k v]
   (let [current-value (nkv-get-raw nkvi k)]
