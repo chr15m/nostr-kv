@@ -112,11 +112,11 @@
   ; else
   ;   map over all localstorage keys collecting result of (filter nulls) =
   ;     if key matches prefix
-  ;       read the key from localstorage
+  ;       nkv-get-raw the current value, last-sync, last-modified from localStorage key
   ;       if last-modified > last-synced
   ;         try
-  ;           post the key and value to nostr = (:k :v :lm) but not :ls
-  ;           update the key last-synced to the last-modified in the localStorage
+  ;           post this key and value to nostr = (:k :v :lm) but not :ls
+  ;           nkv-set-last-sync the last-synced to the published last-modified
   ;           return :succeeded
   ;         catch
   ;           return :failed
@@ -151,7 +151,6 @@
                       (fn [res err]
                         ; only one of these should ever be running
                         (*nkv-sync-critical-section [res err] nkvi))))))))
-
 
 (defn received-event [nkvi event]
   (js/console.log "received-event" (:ns nkvi) event)
