@@ -83,11 +83,16 @@
 (defn create-event [nkvi k stored]
   (js/console.log "create-event" (pubkey (:sk nkvi)) k stored)
   (let [content (doto stored
-                  (aset "k" k))
+                  (aset "k" k)
+                  (js-delete "ls"))
         encrypted-content (encrypt-content (:sk nkvi) content)
         event-template
         (clj->js
           {:kind (:kind nkvi)
+           ; NOTE: this can mean remote kv gets blatted even if it's newer
+           ; however it will eventually reconcile as they'll receive this
+           ; event with an older last-modified and re-write their value
+           ; with an updated created_at - eventually consistent.
            :created_at (js/Math.floor (/ (js/Date.now) 1000))
            :tags [["nsh" (nostr-hash nkvi (str "_nkv-" (:ns nkvi)))]
                   ["d" (nostr-hash nkvi (nkv-key nkvi k))]]
@@ -145,7 +150,7 @@
 
 
 (defn received-event [nkvi event]
-  (js/console.log "nkv event" (:ns nkvi) event)
+  (js/console.log "received-event" (:ns nkvi) event)
   (let [decrypted-content
         (decrypt-content
           (:sk nkvi)
@@ -183,9 +188,9 @@
 ; public API
 
 (defn create-store
-  "Create a new nostr key value store.
+  "Create a new Nostr-synced key-value store.
   opts:
-  - ns = namespace for this store (default: nil)
+  - ns = namespace for this store (default: null)
   - kind = nostr kind (default: 31337)
   - sk = secret key (default: generated key bytes)
   - relays (default: [relay.damus.io, relay.nostr.band])"
@@ -206,12 +211,26 @@
                      })}
       opts)))
 
-(defn nkv-get [nkvi k]
+(defn wait-for-sync
+  "Returns a promise that resolves once sync is done (or immediately)."
+  [nkvi]
+  (or
+    (:running @(:state nkvi))
+    (js/Promise.resolved true)))
+
+(defn nkv-get
+  "Returns the JSON blob stored under `k`."
+  [nkvi k]
   (aget (nkv-get-raw nkvi k) "v"))
 
-(defn nkv-set [nkvi k v]
+(defn nkv-set
+  "Set the value of `k` to `v` and then start a sync to the network."
+  [nkvi k v]
   (nkv-set-raw nkvi k v)
-  (nkv-sync nkvi))
+  (nkv-sync nkvi)
+  nkvi)
 
-(defn nkv-del [nkvi k]
+(defn nkv-del
+  "Set the value of `k` to null."
+  [nkvi k]
   (nkv-set nkvi k nil))
