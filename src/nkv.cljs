@@ -10,8 +10,51 @@
 (def backoff-timings
   [1000 1000 2000 3000 5000 10000 30000])
 
+; Nostr specific calls
+
 (defn pubkey [sk]
   (NostrTools.getPublicKey sk))
+
+(defn encrypt-content [sk content]
+  (NostrTools.nip04.encrypt sk (pubkey sk) (js/JSON.stringify (clj->js content))))
+
+(defn decrypt-content [sk pk encrypted-content]
+  (try
+    (let [decrypted (NostrTools.nip04.decrypt sk pk encrypted-content)]
+      (js->clj (js/JSON.parse decrypted) :keywordize-keys true))
+    (catch :default e
+      (js/console.error "Failed to decrypt content" e)
+      nil)))
+
+(defn nostr-hash [nkvi txt]
+  ; hack to get cheap cross-platform hashing of the namespace
+  (NostrTools.getEventHash
+    #js {:kind NostrTools.kinds.Application + 3142
+         :created_at 0
+         :tags #js []
+         :pubkey (pubkey (:sk nkvi))
+         :content txt}))
+
+(defn nkv-key [nkvi k]
+  (let [nkv-ns (:ns nkvi)]
+    (str "_nkv-"
+         (when nkv-ns
+           (str nkv-ns "-"))
+         k)))
+
+(defn create-event [nkvi k stored]
+  (js/console.log "create-event" (pubkey (:sk nkvi)) k stored)
+  (let [content (merge {:k k} stored)
+        encrypted-content (encrypt-content (:sk nkvi) content)
+        event-template
+        #js {:kind (:kind nkvi)
+             :created_at (js/Math.floor (/ (js/Date.now) 1000))
+             :tags #js [#js ["nsh" (nostr-hash nkvi (str "_nkv-" (:ns nkvi)))]
+                        #js ["d" (nostr-hash nkvi (nkv-key nkvi k))]]
+             :content encrypted-content}]
+    (js/console.log "event-template" event-template)
+    (js/console.log "content" (clj->js content))
+    (NostrTools.finalizeEvent event-template (:sk nkvi))))
 
 ; schedule sync:
 ; - after writes
@@ -41,7 +84,7 @@
     (clj->js (:relays nkvi))
     (clj->js [{:kinds [(:kind nkvi)]
                "#p" [(pubkey (:sk nkvi))]
-               "#d" [(str "_nkv-" (:ns nkvi))]}])
+               "#nsh" [(nostr-hash nkvi (str "_nkv-" (:ns nkvi)))]}])
     (clj->js
       {:onevent #(received-event nkvi %)
        :oneose (fn [] (js/console.log "nkv eose"))}))
@@ -54,12 +97,14 @@
   - kind = nostr kind (default: 31337)
   - sk = secret key (default: generated key bytes)
   - relays (default: [relay.damus.io, relay.nostr.band])"
+  ; TODO: let the user pass in storage and get/set/list calls
   [opts]
   (subscribe-to-updates
     (merge
       {:ns nil
        :kind 31337
-       :sk (or (:sk opts) (NostrTools.generateSecretKey))
+       :sk (or (:sk opts)
+               (NostrTools.generateSecretKey))
        :relays default-relays
        ; internal
        :pool (NostrTools.pool.SimplePool.)
@@ -69,14 +114,7 @@
                      })}
       opts)))
 
-(defn nkv-key [nkvi k]
-  (let [nkv-ns (:ns nkvi)]
-    (str "_nkv-"
-         (when nkv-ns
-           (str nkv-ns "-"))
-         k)))
-
-(defn *nkv-sync [[_res _err] _nkvi & [_iteration]]
+(defn *nkv-sync-critical-section [[_res _err] _nkvi & [_iteration]]
   ; if last-write was less than 1 second ago
   ;   setTimeout
   ;     recur [res err] nkvi
@@ -122,7 +160,7 @@
                     (js/Promise.
                       (fn [res err]
                         ; only one of these should ever be running
-                        (*nkv-sync [res err] nkvi))))))))
+                        (*nkv-sync-critical-section [res err] nkvi))))))))
 
 (defn nkv-get-raw [nkvi k]
   (as-> k k
