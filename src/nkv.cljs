@@ -186,7 +186,7 @@
     (:pool nkvi)
     (clj->js (:relays nkvi))
     (clj->js [{:kinds [(:kind nkvi)]
-               "#p" [(pubkey (:sk nkvi))]
+               :authors [(pubkey (:sk nkvi))]
                "#nsh" [(nostr-hash nkvi (str "_nkv-" (:ns nkvi)))]}])
     (clj->js
       {:onevent #(received-event nkvi %)
