@@ -62,14 +62,17 @@
     (js/JSON.parse k)
     (or k #js {})))
 
-(defn nkv-set-raw [nkvi k v]
+(defn nkv-set-raw [nkvi k v & [last-modified]]
   (let [current-value (nkv-get-raw nkvi k)]
     (.setItem js/localStorage
               (nkv-key nkvi k)
               (->
                 (doto current-value
                   (aset "v" v)
-                  (aset "lm" (-> (js/Date) .getTime)))
+                  (aset "lm"
+                        (or
+                          last-modified
+                          (-> (js/Date) .getTime))))
                 js/JSON.stringify))))
 
 (defn nkv-set-last-sync [nkvi k last-sync]
@@ -166,7 +169,7 @@
       (> remote-last-modified local-last-modified)
       ; update local item
       (do
-        (nkv-set-raw nkvi k remote-value)
+        (nkv-set-raw nkvi k remote-value remote-last-modified)
         ; run callback with update
         (when (fn? (:onChange nkvi))
           ((:onChange nkvi) k remote-value)))
