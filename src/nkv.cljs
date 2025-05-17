@@ -64,18 +64,18 @@
     (js/JSON.parse k)
     (or k #js {})))
 
-(defn nkv-set-raw [nkvi k v & [last-modified]]
+(defn nkv-set-raw [nkvi k v & [remote-last-modified]]
   (let [current-value (nkv-get-raw nkvi k)]
-    (.setItem js/localStorage
-              (nkv-key nkvi k)
-              (->
-                (doto current-value
-                  (aset "v" v)
-                  (aset "lm"
-                        (or
-                          last-modified
-                          (-> (js/Date) .getTime))))
-                js/JSON.stringify))))
+    (aset current-value "v" v)
+    (aset current-value "lm"
+         (or remote-last-modified
+             (-> (js/Date) .getTime)))
+    (when remote-last-modified
+      (aset current-value "ls" remote-last-modified))
+    (->> current-value
+        js/JSON.stringify
+        (.setItem js/localStorage
+                  (nkv-key nkvi k)))))
 
 (defn nkv-set-last-sync [nkvi k last-sync]
   (let [current-value (nkv-get-raw nkvi k)]
