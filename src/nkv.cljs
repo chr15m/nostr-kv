@@ -106,38 +106,87 @@
     (js/console.log "event-template" event-template)
     (NostrTools.finalizeEvent event-template (:sk nkvi))))
 
-(defn *nkv-sync-critical-section [[_res _err] _nkvi & [_iteration]]
+(defn *nkv-sync-critical-section [[res err] nkvi & [iteration]] ; (inc nil) = 1
   ; if last-write was less than 1 second ago
-  ;   setTimeout
-  ;     recur [res err] nkvi
-  ;     ms = (1001 - (now - last-write))
-  ; else
-  ;   map over all localstorage keys collecting result of (filter nulls) =
-  ;     if key matches prefix
-  ;       nkv-get-raw the current value, last-sync, last-modified from localStorage key
-  ;       if last-modified > last-synced
-  ;         try
-  ;           post this key and value to nostr = (:k :v :lm) but not :ls
-  ;           nkv-set-last-sync the last-synced to the published last-modified
-  ;           return :succeeded
-  ;         catch
-  ;           return :failed
-  ;   if any writes failed (partial sync)
-  ;     if iteration < dec(count(backoff-timings))
-  ;       setTimeout
-  ;          recur
-  ;          ms = 1 + backoff-timing[iteration || 0]
-  ;     else
-  ;        set :running and :queued to nil
-  ;        err
-  ;   else
-  ;     set last-write
-  ;     if queued is true
-  ;       recur
-  ;     else
-  ;       set :running and :queued to nil
-  ;       resolve the :running promise
-  )
+  (let [last-write (-> nkvi :state deref :last-write)
+        now (-> (js/Date.) .getTime)]
+    (if (> last-write
+           (- now 1000))
+      ; setTimeout
+      (js/setTimeout
+        ; recur [res err] nkvi
+        #(*nkv-sync-critical-section [res err] nkvi iteration)
+        ; ms = (1001 - (now - last-write))
+        (- 1001 (- now last-write)))
+      ; else
+      ; map over all localstorage keys collecting result of (filter nulls) =
+      ;   if key matches prefix
+      (let [key-prefix (nkv-key nkvi "")
+            key-prefix-length (aget key-prefix "length")
+            matching-keys (-> (js/Object.keys js/localStorage)
+                            (.filter
+                              #(and (string? %)
+                                    (.startsWith % key-prefix)))
+                            (.map
+                              #(.substring % key-prefix-length)))
+            ; write to nostr in sequence
+            threaded-promises-map
+            (reduce
+              (fn [promises k]
+                (let [previous-promise (last promises) ; last is safe on #js []
+                      current-promise
+                      (js/Promise.
+                        (fn [res err]
+                          ; post this storage-key to Nostr
+                          (let [post-fn
+                                (fn []
+                                  (let [current-value (nkv-get-raw nkvi k)]
+                                    
+                                    )
+                                  ;     nkv-get-raw the current value, last-sync, last-modified from localStorage key
+                                  ;     if last-modified > last-synced
+                                  ;       try
+                                  ;         post this key and value to nostr = (:k :v :lm) but not :ls
+                                  ;         nkv-set-last-sync the last-synced to the published last-modified
+                                  ;         return :succeeded
+                                  ;       catch
+                                  ;         return :failed
+                                  )
+                                
+
+                                ]
+
+                            ; wait for the previous promise to resolve or err
+                            (-> previous-promise
+                                (.then post-fn)
+                                (.catch post-fn)))))]
+                  (doto promises
+                    (.push current-promise))))
+              #js []
+              matching-keys)]
+        ; wait for all of the nostr promises to resolve
+        (.then
+          ; use allSettled to get as many successful key writes as possible
+          (js/Promise.allSettled threaded-promises-map)
+          (fn [results]
+            ; if any writes failed (partial sync)
+            ;   if iteration < dec(count(backoff-timings))
+            ;     setTimeout
+            ;        recursive *nkv-sync-critical-section call with iteration++
+            ;        ms = 1 + backoff-timing[iteration || 0]
+            ;   else
+            ;      set :running and :queued to nil
+            ;      err
+            ; else
+            ;   set last-write
+            ;   if queued is true
+            ;     ; we don't resolve :running since listeners
+            ;     ; want to wait until sync is completely finished
+            ;     recursive *nkv-sync-critical-section call
+            ;   else
+            ;     set :running and :queued to nil
+            ;     resolve the :running promise
+            ))))))
 
 (defn nkv-sync [{:keys [state] :as nkvi}]
   (swap! state
