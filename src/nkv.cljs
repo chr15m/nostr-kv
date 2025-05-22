@@ -124,11 +124,11 @@
       (let [key-prefix (nkv-key nkvi "")
             key-prefix-length (aget key-prefix "length")
             matching-keys (-> (js/Object.keys js/localStorage)
-                            (.filter
-                              #(and (string? %)
-                                    (.startsWith % key-prefix)))
-                            (.map
-                              #(.substring % key-prefix-length)))
+                              (.filter
+                                #(and (string? %)
+                                      (.startsWith % key-prefix)))
+                              (.map
+                                #(.substring % key-prefix-length)))
             ; write to nostr in sequence
             threaded-promises-map
             (reduce
