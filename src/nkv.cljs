@@ -106,6 +106,47 @@
     (js/console.log "event-template" event-template)
     (NostrTools.finalizeEvent event-template (:sk nkvi))))
 
+(defn *nkv-post-key-to-nostr
+  [nkvi k res err]
+  (try
+    ; nkv-get-raw the current value, last-sync,
+    ; last-modified from localStorage key
+    (let [current-value (nkv-get-raw nkvi k)
+          last-modified (aget current-value "lm")]
+      ; if last-modified > last-synced
+      (if (> last-modified
+             (aget current-value "ls"))
+        ; post this key and value to nostr = (:k :v :lm) but not :ls
+        (let [signed-event (create-event nkvi k
+                                         current-value)
+              publish-promises
+              (.publish
+                (:pool nkvi)
+                (clj->js (:relays nkvi))
+                signed-event)]
+          (->
+            (js/Promise.allSettled publish-promises)
+            (.then
+              ; check successful relay publish counts
+              (fn [results]
+                (let [fulfilled (.filter results
+                                         #(= (aget %
+                                                   "status")
+                                             "fulfilled"))]
+                  (if (seq fulfilled)
+                    (do
+                      ; nkv-set-last-sync the last-synced
+                      ; to the published last-modified
+                      (nkv-set-last-sync nkvi k
+                                         last-modified)
+                      (res k))
+                    ; all relays publishes failed
+                    (err k)))))
+            (.catch #(err %))))
+        ; if we don't need to sync this key
+        (res k)))
+    (catch :default e (err e))))
+
 (defn *nkv-sync-critical-section [[res err] nkvi & [iteration]] ; (inc nil) = 1
   ; if last-write was less than 1 second ago
   (let [last-write (-> nkvi :state deref :last-write)
@@ -136,30 +177,19 @@
                 (let [previous-promise (last promises) ; last is safe on #js []
                       current-promise
                       (js/Promise.
-                        (fn [res err]
+                        (fn [post-res post-err]
                           ; post this storage-key to Nostr
                           (let [post-fn
-                                (fn []
-                                  (let [current-value (nkv-get-raw nkvi k)]
-                                    
-                                    )
-                                  ;     nkv-get-raw the current value, last-sync, last-modified from localStorage key
-                                  ;     if last-modified > last-synced
-                                  ;       try
-                                  ;         post this key and value to nostr = (:k :v :lm) but not :ls
-                                  ;         nkv-set-last-sync the last-synced to the published last-modified
-                                  ;         return :succeeded
-                                  ;       catch
-                                  ;         return :failed
-                                  )
-                                
-
-                                ]
-
-                            ; wait for the previous promise to resolve or err
-                            (-> previous-promise
-                                (.then post-fn)
-                                (.catch post-fn)))))]
+                                #(*nkv-post-key-to-nostr nkvi k
+                                                         post-res
+                                                         post-err)]
+                            (if previous-promise
+                              ; wait for the previous promise to resolve or err
+                              (-> previous-promise
+                                  (.then post-fn)
+                                  (.catch post-fn))
+                              ; first promise, just run it
+                              (post-fn)))))]
                   (doto promises
                     (.push current-promise))))
               #js []
